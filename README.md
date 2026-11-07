@@ -76,7 +76,8 @@ Staking runs on two new [Any Wallet Kit](https://docs.anywallet.tech) modules, w
 - `@anywalletkit/protocol-staking-liquid-near`: LiNEAR and Rhea rNEAR, pinned by contract and code hash.
 
 Diff: https://github.com/ultratestbro/anywalletkit/compare/main...feat/near-staking. Until they are on npm the app
-installs them from `vendor/*.tgz`, packed from that branch.
+installs them from `vendor/*.tgz`, packed from that branch; `vendor/README.md` lists the source commits and sha256
+of both tarballs.
 
 Baseline (existed before the hackathon, by the same author): Any Wallet Kit's `core`, `wallet-near`, `wallet-solana`
 and `swap2-assets` packages (npm, Apache-2.0).
@@ -93,7 +94,11 @@ AI disclosure: built with Claude Code.
 ```sh
 pnpm install
 pnpm dev            # http://localhost:3501
-pnpm test           # vitest: quote echo, dry-run guard, status machine on recorded 1Click answers, stake amount, pool allow-list, wallet adapter
+pnpm test           # vitest: quote echo, dry-run guard, status machine on recorded 1Click answers, stake amount, wallet adapter,
+                    # and the staking path on the real modules against a fake NEAR node (what the wallet is asked to sign)
+pnpm e2e            # read-only on mainnet: epoch, validators and the allow-list, APRs, a public delegator's positions,
+                    # dry 1Click quotes from Base USDC / Solana SOL / Tron USDT with the echo check, and a deposit_and_stake
+                    # built (not sent) for the delivered amount. View calls and dry quotes only; E2E_REPORT=file.json saves a report
 pnpm typecheck && pnpm lint && pnpm build
 ```
 
@@ -102,8 +107,11 @@ connections in the Pay step).
 
 ## Layout
 
-- `src/lib/staking.ts`: the only door to the staking modules (with a preview fallback for reads while an SDK method
-  is unimplemented; the footer says when preview data is shown).
+- `src/lib/staking.ts`: the only door to the staking modules. It hands out one module instance per account (shared
+  caches), with the app's RPCs, nearblocks history for exact unlock epochs and the archival node for liquid APRs.
+- `vendor/`: the two module tarballs, their source commits and hashes, and how to repack them
+  (`scripts/vendor-sdk.mjs`).
+- `e2e/`: the read-only mainnet checks behind `pnpm e2e`.
 - `src/lib/oneclick/`: request builder and echo check, browser client with the dry-run guard, status machine,
   dry-run replay. Recorded 1Click answers in `src/lib/__fixtures__/oneclick/`.
 - `src/lib/near/`: wallet-selector setup, the `IWalletAccount` adapter over it, the read-only demo account,

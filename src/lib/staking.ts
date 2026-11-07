@@ -1,157 +1,66 @@
-// The one place the app touches the Any Wallet Kit staking modules.
-//
-// Every component calls `nativeStaking()` / `liquidStaking()` and gets an object with the module's
-// method names and shapes (NEAR-STAKING-API.md). Today the packages come from vendor/ tarballs of
-// feat/near-staking; while a method there still throws NotImplementedError, its read or quote is served by
-// the preview backend (./staking/preview.ts, live view calls, never signs). Writes always go to the
-// module. Switching to the finished packages is a repack (or the npm version) and, at most,
-// NEXT_PUBLIC_STAKING_BACKEND=sdk to drop the fallback.
+// The one place the app touches the Any Wallet Kit staking modules
+// (@anywalletkit/protocol-staking-native-near and -liquid-near, installed from vendor/*.tgz until
+// they are on npm; see vendor/README.md). Components get the module instances themselves: every
+// read, quote and write is the module's, with its fresh, fail-closed checks.
 
 import type { IWalletAccount, IWalletAccountReadOnly } from "@anywalletkit/core";
 import {
-  DEFAULT_RESERVE, MIN_STAKE, NativeStakingProtocolNear, NearStakingError, NUM_EPOCHS_TO_UNLOCK,
+  DEFAULT_RESERVE, MIN_STAKE, NativeStakingProtocolNear, NearStakingError, NUM_EPOCHS_TO_UNLOCK, UNSTAKED_DUST,
   type NativeStakingNearConfig, type NearPoolInfo, type PoolRefusal,
 } from "@anywalletkit/protocol-staking-native-near";
-import { LiquidStakingError, LiquidStakingProtocolNear, LIQUID_PRESETS } from "@anywalletkit/protocol-staking-liquid-near";
+import { LiquidStakingError, LiquidStakingProtocolNear, LIQUID_PRESETS, type LiquidPresetName } from "@anywalletkit/protocol-staking-liquid-near";
 import { createNearHistory } from "@anywalletkit/wallet-near/history";
-import { nearProviders } from "./near/config";
-import { PreviewLiquidStaking, PreviewNativeStaking, PreviewWriteError, isNotImplemented } from "./staking/preview";
+import { ARCHIVAL_RPC, nearProviders } from "./near/config";
 
-export { DEFAULT_RESERVE, MIN_STAKE, NUM_EPOCHS_TO_UNLOCK, NearStakingError, LiquidStakingError, PreviewWriteError };
+export { DEFAULT_RESERVE, MIN_STAKE, NUM_EPOCHS_TO_UNLOCK, UNSTAKED_DUST, NearStakingError, LiquidStakingError };
 export type {
   NearEpoch, NearPoolInfo, NearPoolPosition, NearStakeQuote, NearUnstakeQuote, NearClaimQuote, NearWithdrawalRequest, PoolRefusal, UnlockEstimate,
   NearStakingWarning, NearNetworkStats,
 } from "@anywalletkit/protocol-staking-native-near";
 export type { LiquidPoolInfo, LiquidAccountDetails, LiquidStakeQuote, LiquidUnstakeQuote, LiquidClaimQuote, LiquidWithdrawalRequest, LiquidStakingWarning } from "@anywalletkit/protocol-staking-liquid-near";
 
-type Mode = "auto" | "sdk" | "preview";
-const MODE: Mode = ((): Mode => {
-  const m = process.env.NEXT_PUBLIC_STAKING_BACKEND;
-  return m === "sdk" || m === "preview" ? m : "auto";
-})();
-
-// which backend answered each method last: the footer badge says honestly when preview data is shown
-const used = new Map<string, "sdk" | "preview">();
-const listeners = new Set<() => void>();
-function note(method: string, by: "sdk" | "preview") {
-  if (used.get(method) === by) return;
-  used.set(method, by);
-  for (const l of listeners) l();
-}
-export function backendUsage(): { mode: Mode; preview: string[]; sdk: string[] } {
-  const all = [...used.entries()];
-  return { mode: MODE, preview: all.filter(([, b]) => b === "preview").map(([m]) => m), sdk: all.filter(([, b]) => b === "sdk").map(([m]) => m) };
-}
-export function onBackendUsage(l: () => void): () => void {
-  listeners.add(l);
-  return () => listeners.delete(l);
-}
-
-/** Exported for tests only. */
-export function _bridge<A extends unknown[], R>(name: string, sdk: (...a: A) => Promise<R>, preview?: (...a: A) => Promise<R>) {
-  return bridge(name, sdk, preview);
-}
-
-function bridge<A extends unknown[], R>(name: string, sdk: (...a: A) => Promise<R>, preview?: (...a: A) => Promise<R>): (...a: A) => Promise<R> {
-  return async (...a: A) => {
-    if (MODE === "preview" && preview) {
-      note(name, "preview");
-      return preview(...a);
-    }
-    try {
-      const r = await sdk(...a);
-      note(name, "sdk");
-      return r;
-    } catch (e) {
-      if (!isNotImplemented(e)) throw e;
-      if (preview && MODE === "auto") {
-        note(name, "preview");
-        return preview(...a);
-      }
-      throw new PreviewWriteError(name);
-    }
-  };
-}
-
 type Account = IWalletAccountReadOnly | IWalletAccount;
 
-/** Native staking for `account`: any standard pool the module's allow-list accepts, mainnet. */
 // one history source for the session: keyless nearblocks allows a few requests a minute
 let history: ReturnType<typeof createNearHistory> | null = null;
 
-export function nativeStaking(account: Account, extra: Partial<NativeStakingNearConfig> = {}) {
+// One instance per account object, so every component viewing the same account shares the
+// module's caches (the 375 KB validators answer, block times, pool details).
+const natives = new WeakMap<Account, NativeStakingProtocolNear>();
+const liquids = new WeakMap<Account, Map<LiquidPresetName, LiquidStakingProtocolNear>>();
+
+/** Native staking for `account`: any standard pool the module's allow-list accepts, mainnet. */
+export function nativeStaking(account: Account, extra: Partial<NativeStakingNearConfig> = {}): NativeStakingProtocolNear {
+  const shared = Object.keys(extra).length === 0;
+  const hit = shared ? natives.get(account) : undefined;
+  if (hit) return hit;
   history ??= createNearHistory({ network: "mainnet" });
   // history dates the last unstake, so the countdown shows the exact unlock epoch instead of a 1–4 epoch range
-  const config: NativeStakingNearConfig = { pools: "any", provider: nearProviders(), discover: "fastnear", history, ...extra };
-  const sdk = new NativeStakingProtocolNear(account, config);
-  const p = new PreviewNativeStaking(account, config);
-  return {
-    get network() {
-      return sdk.network;
-    },
-    reserve: sdk.reserve,
-    maxFee: sdk.maxFee,
-    getEpoch: bridge("native.getEpoch", () => sdk.getEpoch(), () => p.getEpoch()),
-    getNetworkStats: bridge("native.getNetworkStats", () => sdk.getNetworkStats(), () => p.getNetworkStats()),
-    listPools: bridge("native.listPools", () => sdk.listPools(), () => p.listPools()),
-    getPool: bridge("native.getPool", (id: string) => sdk.getPool(id), (id: string) => p.getPool(id)),
-    getPools: bridge("native.getPools", (ids: string[]) => sdk.getPools(ids), (ids: string[]) => p.getPools(ids)),
-    listPositions: bridge("native.listPositions", (o?: { pools?: string[] }) => sdk.listPositions(o), (o?: { pools?: string[] }) => p.listPositions(o)),
-    getMaxStakeable: bridge("native.getMaxStakeable", () => sdk.getMaxStakeable(), () => p.getMaxStakeable()),
-    getApr: bridge("native.getApr", (o?: { pool?: string }) => sdk.getApr(o), (o?: { pool?: string }) => p.getApr(o)),
-    getStakedBalance: bridge("native.getStakedBalance", () => sdk.getStakedBalance(), () => p.getStakedBalance()),
-    getWithdrawalRequests: bridge("native.getWithdrawalRequests", () => sdk.getWithdrawalRequests(), () => p.getWithdrawalRequests()),
-    quoteStake: bridge("native.quoteStake", (o: Parameters<typeof sdk.quoteStake>[0]) => sdk.quoteStake(o), (o: Parameters<typeof sdk.quoteStake>[0]) => p.quoteStake(o)),
-    stake: bridge("native.stake", (o: Parameters<typeof sdk.stake>[0]) => sdk.stake(o)),
-    quoteRequestWithdrawal: bridge(
-      "native.quoteRequestWithdrawal",
-      (o: Parameters<typeof sdk.quoteRequestWithdrawal>[0]) => sdk.quoteRequestWithdrawal(o),
-      (o: Parameters<typeof sdk.quoteRequestWithdrawal>[0]) => p.quoteRequestWithdrawal(o),
-    ),
-    requestWithdrawal: bridge("native.requestWithdrawal", (o: Parameters<typeof sdk.requestWithdrawal>[0]) => sdk.requestWithdrawal(o)),
-    quoteClaimWithdrawals: bridge(
-      "native.quoteClaimWithdrawals",
-      (o?: Parameters<typeof sdk.quoteClaimWithdrawals>[0]) => sdk.quoteClaimWithdrawals(o),
-      (o?: Parameters<typeof sdk.quoteClaimWithdrawals>[0]) => p.quoteClaimWithdrawals(o),
-    ),
-    claimWithdrawals: bridge("native.claimWithdrawals", (o?: Parameters<typeof sdk.claimWithdrawals>[0]) => sdk.claimWithdrawals(o)),
-  };
+  const s = new NativeStakingProtocolNear(account, { pools: "any", provider: nearProviders(), discover: "fastnear", history, ...extra });
+  if (shared) natives.set(account, s);
+  return s;
 }
-export type NativeStaking = ReturnType<typeof nativeStaking>;
+export type NativeStaking = NativeStakingProtocolNear;
 
-export type LiquidPreset = keyof typeof LIQUID_PRESETS;
+export type LiquidPreset = LiquidPresetName;
 export const LIQUID_OPTIONS: Array<{ id: LiquidPreset; symbol: string; label: string; contract: string; note: string }> = [
-  { id: "rnear", symbol: "rNEAR", label: "Rhea rNEAR", contract: LIQUID_PRESETS.rnear.contracts.mainnet.contract, note: "Rhea's liquid staking token (5 % protocol fee)" },
-  { id: "linear", symbol: "LiNEAR", label: "LiNEAR", contract: LIQUID_PRESETS.linear.contracts.mainnet.contract, note: "LiNEAR Protocol's liquid staking token (6 % protocol fee)" },
+  { id: "rnear", symbol: "rNEAR", label: "Rhea rNEAR", contract: LIQUID_PRESETS.rnear.contracts.mainnet!.contract, note: "Rhea's liquid staking token (5 % protocol fee)" },
+  { id: "linear", symbol: "LiNEAR", label: "LiNEAR", contract: LIQUID_PRESETS.linear.contracts.mainnet!.contract, note: "LiNEAR Protocol's liquid staking token (6 % protocol fee)" },
 ];
 
 /** Liquid staking through a LiNEAR-family contract (rNEAR or LiNEAR), pinned by account id and code hash. */
-export function liquidStaking(account: Account, pool: LiquidPreset) {
-  const config = { pool, provider: nearProviders() };
-  const sdk = new LiquidStakingProtocolNear(account, config);
-  const p = new PreviewLiquidStaking(account, config);
-  return {
-    pool: sdk.pool,
-    getEpoch: bridge(`${pool}.getEpoch`, () => sdk.getEpoch(), () => p.getEpoch()),
-    getPoolInfo: bridge(`${pool}.getPoolInfo`, () => sdk.getPoolInfo(), () => p.getPoolInfo()),
-    getAccountDetails: bridge(`${pool}.getAccountDetails`, () => sdk.getAccountDetails(), () => p.getAccountDetails()),
-    getMaxStakeable: bridge(`${pool}.getMaxStakeable`, () => sdk.getMaxStakeable(), () => p.getMaxStakeable()),
-    getApr: bridge(`${pool}.getApr`, () => sdk.getApr(), () => p.getApr()),
-    getStakedBalance: bridge(`${pool}.getStakedBalance`, () => sdk.getStakedBalance(), () => p.getStakedBalance()),
-    getWithdrawalRequests: bridge(`${pool}.getWithdrawalRequests`, () => sdk.getWithdrawalRequests(), () => p.getWithdrawalRequests()),
-    quoteStake: bridge(`${pool}.quoteStake`, (o: Parameters<typeof sdk.quoteStake>[0]) => sdk.quoteStake(o), (o: Parameters<typeof sdk.quoteStake>[0]) => p.quoteStake(o)),
-    stake: bridge(`${pool}.stake`, (o: Parameters<typeof sdk.stake>[0]) => sdk.stake(o)),
-    quoteRequestWithdrawal: bridge(
-      `${pool}.quoteRequestWithdrawal`,
-      (o: Parameters<typeof sdk.quoteRequestWithdrawal>[0]) => sdk.quoteRequestWithdrawal(o),
-      (o: Parameters<typeof sdk.quoteRequestWithdrawal>[0]) => p.quoteRequestWithdrawal(o),
-    ),
-    requestWithdrawal: bridge(`${pool}.requestWithdrawal`, (o: Parameters<typeof sdk.requestWithdrawal>[0]) => sdk.requestWithdrawal(o)),
-    quoteClaimWithdrawals: bridge(`${pool}.quoteClaimWithdrawals`, () => sdk.quoteClaimWithdrawals(), () => p.quoteClaimWithdrawals()),
-    claimWithdrawals: bridge(`${pool}.claimWithdrawals`, (o?: Parameters<typeof sdk.claimWithdrawals>[0]) => sdk.claimWithdrawals(o)),
-  };
+export function liquidStaking(account: Account, pool: LiquidPreset): LiquidStakingProtocolNear {
+  let byPool = liquids.get(account);
+  if (!byPool) liquids.set(account, (byPool = new Map()));
+  let s = byPool.get(pool);
+  if (!s) {
+    // the 7-day APR reads a past price; the archival node answers browsers directly (CORS *)
+    s = new LiquidStakingProtocolNear(account, { pool, provider: nearProviders(), archivalProvider: ARCHIVAL_RPC });
+    byPool.set(pool, s);
+  }
+  return s;
 }
-export type LiquidStaking = ReturnType<typeof liquidStaking>;
+export type LiquidStaking = LiquidStakingProtocolNear;
 
 const REFUSAL_TEXT: Record<PoolRefusal, string> = {
   "not-listed": "not on this app's list",
@@ -185,9 +94,11 @@ export function stakingErrorText(e: unknown): string {
     if (e.code === "pool-not-allowed" && e.refusals?.length) return `This pool can't take new stake: ${e.refusals.map(refusalText).join(", ")}.`;
     return e.message;
   }
-  if (e instanceof LiquidStakingError || e instanceof PreviewWriteError) return e.message;
+  if (e instanceof LiquidStakingError) return e.message;
+  const name = (e as { name?: string })?.name ?? "";
+  if (name === "ReadOnlyAccountError") return "This is a read-only demo account: connect your own wallet to sign.";
+  if (name === "InsufficientFundsError") return "Not enough NEAR on the account for this plus gas and the 0.02 NEAR reserve.";
   const m = e instanceof Error ? e.message : String(e);
-  if (/insufficient|InsufficientFunds/i.test(m) || (e as { name?: string })?.name === "InsufficientFundsError") return "Not enough NEAR on the account for this plus gas and the 0.02 NEAR reserve.";
-  if (/ReadOnlyAccount/i.test((e as { name?: string })?.name ?? "")) return "This is a read-only demo account: connect your own wallet to sign.";
+  if (/insufficient/i.test(m)) return "Not enough NEAR on the account for this plus gas and the 0.02 NEAR reserve.";
   return m;
 }

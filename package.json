@@ -9,12 +9,13 @@
     "start": "next start -p 3501",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "e2e": "vitest run --config vitest.e2e.config.mts"
   },
   "dependencies": {
     "@anywalletkit/core": "0.8.0",
-    "@anywalletkit/protocol-staking-liquid-near": "file:vendor/anywalletkit-protocol-staking-liquid-near-0.0.0.tgz",
-    "@anywalletkit/protocol-staking-native-near": "file:vendor/anywalletkit-protocol-staking-native-near-0.0.0.tgz",
+    "@anywalletkit/protocol-staking-liquid-near": "file:vendor/anywalletkit-protocol-staking-liquid-near-0.0.0-4c3bc64f.tgz",
+    "@anywalletkit/protocol-staking-native-near": "file:vendor/anywalletkit-protocol-staking-native-near-0.0.0-4c3bc64f.tgz",
     "@anywalletkit/swap2-assets": "0.2.2",
     "@anywalletkit/wallet-near": "0.4.0",
     "@anywalletkit/wallet-solana": "0.6.0",

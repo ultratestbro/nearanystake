@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import { Comfortaa, Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { AppProvider } from "@/components/AppProvider";
-import { BackendBadge } from "@/components/BackendBadge";
 import { DryRunToggle, HeaderNav, NearWalletButton } from "@/components/Header";
 import { LogoMark } from "@/components/Logo";
 import "./globals.css";
@@ -59,7 +58,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
                 staking modules. Non-custodial: the app never holds keys or funds.
               </p>
               <p>
-                <BackendBadge />
+                Staking reads, quotes and transactions come from <code>@anywalletkit/protocol-staking-native-near</code> and{" "}
+                <code>@anywalletkit/protocol-staking-liquid-near</code> (pre-release builds from the <code>feat/near-staking</code> branch).
               </p>
             </div>
           </footer>

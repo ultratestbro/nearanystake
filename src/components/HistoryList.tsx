@@ -46,7 +46,8 @@ export function HistoryList() {
           </div>
           {r.type === "flow" ? (
             <p className="text-sm text-muted">
-              {formatUnits(BigInt(r.quote.quote.amountIn), r.source.decimals)} {r.source.symbol} on {r.source.chainLabel} → ≈ {r.quote.quote.amountOutFormatted.slice(0, 10)} · account {shortAccount(r.account)}
+              {formatUnits(BigInt(r.quote.quote.amountIn), r.source.decimals)} {r.source.symbol} on {r.source.chainLabel} → ≈ {r.quote.quote.amountOutFormatted.slice(0, 10)}
+              {r.target === "stnear" ? " stNEAR" : r.quote.quoteRequest.destinationAsset === "nep141:wrap.near" ? " NEAR" : ""} · account {shortAccount(r.account)}
               {r.staked && ` · staked ${formatNear(BigInt(r.staked))}`}
             </p>
           ) : (

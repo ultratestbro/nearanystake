@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { addRecord, newId } from "@/lib/history";
 import { dateTime, duration, formatNear, formatUnits, parseUnits, percent, shortAccount } from "@/lib/format";
 import {
-  LIQUID_OPTIONS, refusalText, stakingErrorText,
+  LIQUID_OPTIONS, UNSTAKED_DUST, refusalText, stakingErrorText,
   type LiquidPreset, type LiquidStaking, type NativeStaking, type NearClaimQuote, type NearPoolPosition, type NearUnstakeQuote, type LiquidUnstakeQuote, type LiquidClaimQuote, type UnlockEstimate,
 } from "@/lib/staking";
 import { useAsync, useNow } from "@/lib/useAsync";
@@ -132,7 +132,8 @@ function PositionCard({ p, native, readOnly, account, onDone }: { p: NearPoolPos
       </Rows>
       {p.unlock && <UnlockLine u={p.unlock} />}
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={() => setOpen(true)} disabled={p.staked === 0n} className="btn-tactile px-3.5 py-2 text-sm font-medium">
+        {/* rounding dust left staked is not worth an unstake: it would restart the unlock timer of everything unstaking here */}
+        <button type="button" onClick={() => setOpen(true)} disabled={p.staked < UNSTAKED_DUST} title={p.staked > 0n && p.staked < UNSTAKED_DUST ? "Only rounding dust is staked here" : undefined} className="btn-tactile px-3.5 py-2 text-sm font-medium">
           Unstake
         </button>
       </div>

@@ -18,6 +18,7 @@ import {
   DEFAULT_RESERVE, LIQUID_OPTIONS, MIN_STAKE, liquidStaking, nativeStaking, poolStatus, refusalText, stakingErrorText,
   type LiquidPreset, type LiquidStakeQuote, type NearPoolInfo, type NearStakeQuote,
 } from "@/lib/staking";
+import { DRY_REFUND } from "@/lib/dryrun";
 import { useAsync, useNow } from "@/lib/useAsync";
 import { useApp } from "./AppProvider";
 import { DepositPanel } from "./DepositPanel";
@@ -32,16 +33,8 @@ import { Banner, Icon, Panel, Pill, PillTabs, Row, Rows, Spinner } from "./ui";
 
 export type Target = { kind: "native"; pool: string } | { kind: "liquid"; preset: LiquidPreset } | { kind: "stnear" };
 
-/**
- * Dry quotes still need a refund address 1Click accepts; these are burn / precompile addresses nobody
- * controls (1Click refuses 0x…dEaD and Solana's system program). Used only when dry and left empty.
- */
-const DRY_REFUND: Record<string, string> = {
-  evm: "0x0000000000000000000000000000000000000001",
-  solana: "1nc1nerator11111111111111111111111111111111",
-  tron: "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb",
-  bitcoin: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
-};
+/** Storage a fresh implicit account holds after the delivery creates it (182 bytes, mainnet tx AQAkvxyT…). */
+const FRESH_ACCOUNT_STORAGE = 182n * 10n ** 19n;
 
 const targetLabel = (t: Target) => (t.kind === "native" ? t.pool : t.kind === "liquid" ? LIQUID_OPTIONS.find((o) => o.id === t.preset)!.symbol : "stNEAR");
 const targetKey = (t: Target) => (t.kind === "native" ? `native:${t.pool}` : t.kind === "liquid" ? `liquid:${t.preset}` : "stnear");
@@ -711,15 +704,25 @@ function StakeStep({
   const [hash, setHash] = useState<string | null>(null);
   const once = useRef(false);
 
+  const simulatedFee = useCallback(async (): Promise<bigint> => {
+    try {
+      const probe = liquid ? await liquid.quoteStake({ amount: MIN_STAKE }) : await native.quoteStake({ amount: MIN_STAKE, pool: (target as { pool: string }).pool });
+      return probe.fee;
+    } catch {
+      return liquid ? 11n * 10n ** 21n : 6n * 10n ** 21n; // the fee bounds measured on 2026-11-08, if the demo account can't quote
+    }
+  }, [liquid, native, target]);
+
   // exactly what was delivered, capped by what the account can spend (critique #2)
   const amount = useAsync(async () => {
     const reported = reportedDelivery(status);
     const delivery = deliveryTxHash(status);
     const onChain = !simulated && delivery ? await deliveredOnChain(delivery, recipient) : null;
-    // a simulated delivery never reached the account: assume a new account paying reserve and gas from it
-    const maxStakeable = simulated ? (reported ?? 0n) - DEFAULT_RESERVE - 5n * 10n ** 21n : liquid ? await liquid.getMaxStakeable() : await native.getMaxStakeable();
+    // a simulated delivery never reached the account: assume a brand-new implicit account that keeps the
+    // reserve, pays the module's own fee bound (read from a quote on the demo account) and its storage
+    const maxStakeable = simulated ? (reported ?? 0n) - DEFAULT_RESERVE - FRESH_ACCOUNT_STORAGE - (await simulatedFee()) : liquid ? await liquid.getMaxStakeable() : await native.getMaxStakeable();
     return stakeAmountAfterDelivery({ reported, onChain, maxStakeable, minStake: MIN_STAKE });
-  }, [status, simulated, recipient, native, liquid]);
+  }, [status, simulated, recipient, native, liquid, simulatedFee]);
 
   const runPreflight = useCallback(async () => {
     if (!amount.data || amount.data.tooSmall) return;

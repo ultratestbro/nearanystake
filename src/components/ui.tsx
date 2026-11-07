@@ -56,11 +56,12 @@ export function Rows({ children, className = "" }: { children: ReactNode; classN
 export function Row({ label, children, hint }: { label: ReactNode; children: ReactNode; hint?: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-4 px-4 py-2.5">
-      <dt className="shrink-0 text-muted">
+      {/* the label side wraps its hint; the value keeps its width (up to 62 %) so amounts never break mid-number */}
+      <dt className="min-w-0 text-muted">
         {label}
         {hint && <span className="block text-xs">{hint}</span>}
       </dt>
-      <dd className="min-w-0 text-right tabular-nums [overflow-wrap:anywhere]">{children}</dd>
+      <dd className="max-w-[62%] shrink-0 text-right tabular-nums [overflow-wrap:anywhere]">{children}</dd>
     </div>
   );
 }
