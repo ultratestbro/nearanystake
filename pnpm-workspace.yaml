@@ -1,0 +1,9 @@
+ignoredBuiltDependencies:
+  - sharp
+  - unrs-resolver
+overrides:
+  # the wagmi adapter's optional connectors range resolves to 8.x, whose Base Account connector
+  # needs packages that aren't installed; wagmi 2 ships with 6.x
+  "@wagmi/connectors": 6.2.0
+  # Base Account's CDP SDK imports the optional x402 packages from 1.5x on; this one doesn't
+  "@coinbase/cdp-sdk": 1.50.0

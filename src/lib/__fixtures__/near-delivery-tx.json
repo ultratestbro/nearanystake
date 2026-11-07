@@ -1,0 +1,159 @@
+{
+  "_note": "Receipts of mainnet tx AQAkvxyT2N2WzZ5LzwZvcw139WHG2JGAvVLqBdVYUttX (1Click native NEAR delivery to a fresh implicit account), function-call args dropped.",
+  "transaction": {
+    "hash": "AQAkvxyT2N2WzZ5LzwZvcw139WHG2JGAvVLqBdVYUttX",
+    "signer_id": "intents.near"
+  },
+  "receipts": [
+    {
+      "predecessor_id": "intents.near",
+      "receiver_id": "intents.near",
+      "receipt": {
+        "Action": {
+          "actions": [
+            {
+              "FunctionCall": {
+                "method_name": "execute_intents"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "predecessor_id": "system",
+      "receiver_id": "intents.near",
+      "receipt": {
+        "Action": {
+          "actions": [
+            {
+              "Transfer": {
+                "deposit": "276032837340823400000000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "predecessor_id": "intents.near",
+      "receiver_id": "wrap.near",
+      "receipt": {
+        "Action": {
+          "actions": [
+            {
+              "FunctionCall": {
+                "method_name": "near_withdraw"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "predecessor_id": "wrap.near",
+      "receiver_id": "intents.near",
+      "receipt": {
+        "Action": {
+          "actions": [
+            {
+              "Transfer": {
+                "deposit": "755320382313437861848238"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "predecessor_id": "system",
+      "receiver_id": "intents.near",
+      "receipt": {
+        "Action": {
+          "actions": [
+            {
+              "Transfer": {
+                "deposit": "10482341912174500000000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "predecessor_id": "system",
+      "receiver_id": "intents.near",
+      "receipt": {
+        "Action": {
+          "actions": [
+            {
+              "Transfer": {
+                "deposit": "200864306250000000000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "predecessor_id": "intents.near",
+      "receiver_id": "intents.near",
+      "receipt": {
+        "Action": {
+          "actions": [
+            {
+              "FunctionCall": {
+                "method_name": "do_native_withdraw"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "predecessor_id": "intents.near",
+      "receiver_id": "fc647e203e0e099212485017b78a0e77dc330019d4b532a4d44408adc0bfd9a1",
+      "receipt": {
+        "Action": {
+          "actions": [
+            {
+              "Transfer": {
+                "deposit": "755320382313437861848237"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "predecessor_id": "system",
+      "receiver_id": "intents.near",
+      "receipt": {
+        "Action": {
+          "actions": [
+            {
+              "Transfer": {
+                "deposit": "5042598108180500000000"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "predecessor_id": "system",
+      "receiver_id": "intents.near",
+      "receipt": {
+        "Action": {
+          "actions": [
+            {
+              "Transfer": {
+                "deposit": "492452918750000000000"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

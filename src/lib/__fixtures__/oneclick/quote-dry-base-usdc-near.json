@@ -1,0 +1,59 @@
+{
+  "http": 201,
+  "request": {
+    "dry": true,
+    "swapType": "EXACT_INPUT",
+    "slippageTolerance": 100,
+    "depositType": "ORIGIN_CHAIN",
+    "refundType": "ORIGIN_CHAIN",
+    "recipientType": "DESTINATION_CHAIN",
+    "deadline": "2026-11-07T22:54:06.841Z",
+    "originAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+    "destinationAsset": "nep141:wrap.near",
+    "amount": "3000000",
+    "refundTo": "0x2527D02599Ba641c19FEa793cD0F167589a0f10D",
+    "recipient": "nima.near"
+  },
+  "response": {
+    "quote": {
+      "amountIn": "3000000",
+      "amountInFormatted": "3.0",
+      "amountInUsd": "2.998863000000",
+      "minAmountIn": "3000000",
+      "amountOut": "820134352925939572485612",
+      "amountOutFormatted": "0.820134352925939572485612",
+      "amountOutUsd": "2.985289044650",
+      "minAmountOut": "811933009396680176760755",
+      "timeEstimate": 37,
+      "refundFee": "2400",
+      "withdrawFee": "0"
+    },
+    "quoteRequest": {
+      "dry": true,
+      "depositMode": "SIMPLE",
+      "swapType": "EXACT_INPUT",
+      "slippageTolerance": 100,
+      "originAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+      "depositType": "ORIGIN_CHAIN",
+      "destinationAsset": "nep141:wrap.near",
+      "amount": "3000000",
+      "refundTo": "0x2527D02599Ba641c19FEa793cD0F167589a0f10D",
+      "refundType": "ORIGIN_CHAIN",
+      "recipient": "nima.near",
+      "recipientType": "DESTINATION_CHAIN",
+      "deadline": "2026-11-07T22:54:06.841Z",
+      "confidentiality": "public",
+      "quoteWaitingTimeMs": 0,
+      "insured": false,
+      "appFees": [
+        {
+          "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+          "fee": 20
+        }
+      ]
+    },
+    "signature": "ed25519:yy6SKP6gvGDfMNMiSToZQhfaLdNaD1wUZmDSedUytCwVBzfFX5eHT2tAorML3FWsrEownzTChg5gRdZ3RCBxmHX",
+    "timestamp": "2026-11-07T21:54:06.952Z",
+    "correlationId": "11882a7f-b02d-46ef-8904-db288aabd057"
+  }
+}

@@ -1,0 +1,82 @@
+{
+  "_note": "Derived from the recorded PENDING_DEPOSIT answer (status-pending-expired.json) following the 1Click OpenAPI GetExecutionStatusResponse schema; the SUCCESS amounts and hash are the real delivery tx AQAkvxyT… (Oct 2026, native NEAR to a fresh implicit account).",
+  "http": 200,
+  "response": {
+    "status": "FAILED",
+    "updatedAt": "2026-11-02T17:48:13.127Z",
+    "correlationId": "7970e1a1-fec6-408d-9907-d44fdf02ead8",
+    "swapDetails": {
+      "depositedAmount": "1000469",
+      "depositedAmountUsd": null,
+      "depositedAmountFormatted": "1.000469",
+      "intentHashes": [],
+      "nearTxHashes": [],
+      "amountIn": null,
+      "amountInFormatted": null,
+      "amountInUsd": null,
+      "amountOut": null,
+      "amountOutFormatted": null,
+      "amountOutUsd": null,
+      "slippage": null,
+      "refundedAmount": "0",
+      "refundedAmountFormatted": "0",
+      "refundedAmountUsd": "0",
+      "refundReason": null,
+      "refundFee": "2400",
+      "withdrawFee": "0",
+      "originChainTxHashes": [
+        {
+          "hash": "0x5f1c0d2e8a9b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d",
+          "explorerUrl": "https://basescan.org/tx/0x5f1c0d2e8a9b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d"
+        }
+      ],
+      "destinationChainTxHashes": []
+    },
+    "quoteResponse": {
+      "timestamp": "2026-11-02T17:48:12.649Z",
+      "signature": "ed25519:2RnfhfmubRiPHbv448Gt1QkFtvwmik53Q96utT5gMM2tS3EMxyRa7hoJjoE7SrkEu22iToYY2W4bAVbo9Q9HxKPn",
+      "quoteRequest": {
+        "dry": false,
+        "swapType": "EXACT_INPUT",
+        "depositMode": "SIMPLE",
+        "slippageTolerance": 100,
+        "originAsset": "nep141:base-0x833589fcd6edb6e08f4c7c32d4f71b54bda02913.omft.near",
+        "depositType": "ORIGIN_CHAIN",
+        "destinationAsset": "nep141:wrap.near",
+        "amount": "1000469",
+        "refundTo": "0x63428e70a8016d10e8e2f7da440c898063afa299",
+        "refundType": "ORIGIN_CHAIN",
+        "recipient": "fc647e203e0e099212485017b78a0e77dc330019d4b532a4d44408adc0bfd9a1",
+        "recipientType": "DESTINATION_CHAIN",
+        "deadline": "2026-11-02T18:48:12.000Z",
+        "appFees": [
+          {
+            "limitOrderId": null,
+            "recipient": "5880ad2b362620fadf759cbceb1cd5737ce8c6ed7fb8e9942881e6731f9247dd",
+            "fee": 20
+          }
+        ],
+        "virtualChainRecipient": null,
+        "virtualChainRefundRecipient": null,
+        "referral": null,
+        "confidentiality": "public"
+      },
+      "quote": {
+        "amountIn": "1000469",
+        "amountInFormatted": "1.000469",
+        "amountInUsd": "0.999999780039",
+        "minAmountIn": "1000469",
+        "amountOut": "255018535208889485801994",
+        "amountOutFormatted": "0.255018535208889485801994",
+        "amountOutUsd": "0.994572287315",
+        "minAmountOut": "252468349856800590943974",
+        "timeWhenInactive": "2026-11-05T18:48:12.000Z",
+        "depositAddress": "0x62F099A5C804f165351eE84CA41239b4283fAe1a",
+        "deadline": "2026-11-05T18:48:12.000Z",
+        "timeEstimate": 37,
+        "refundFee": "2400",
+        "withdrawFee": "0"
+      }
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "http": 400,
+  "request": {
+    "dry": true,
+    "swapType": "EXACT_INPUT",
+    "slippageTolerance": 100,
+    "depositType": "ORIGIN_CHAIN",
+    "refundType": "ORIGIN_CHAIN",
+    "recipientType": "DESTINATION_CHAIN",
+    "deadline": "2026-11-07T22:54:06.841Z",
+    "originAsset": "nep141:tron-d28a265909efecdcee7c5028585214ea0b96f015.omft.near",
+    "destinationAsset": "nep141:wrap.near",
+    "amount": "10000000",
+    "refundTo": "TNPeeaaFB7K9cmo4uQpcU32zGK8G1NYqeL",
+    "recipient": "nima.near"
+  },
+  "response": {
+    "message": "Temporary swap limits: minimum swap amount is $100",
+    "correlationId": "e0e3c7b6-033b-40ba-94bb-4fcfac7f75f4",
+    "timestamp": "2026-11-07T21:54:11.276Z",
+    "path": "/v0/quote"
+  }
+}
