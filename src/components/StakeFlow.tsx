@@ -5,17 +5,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { KNOWN_MINIMUM_USD, MEMO_CHAINS, NEAR_ICON, PINNED_CHAINS, SOURCE_ASSETS, findAsset, looksLikeAddress, type SourceAsset } from "@/lib/assets";
 import { addRecord, getFlow, newId, updateFlow, type FlowRecord } from "@/lib/history";
 import { DEMO_ACCOUNT, SUGGESTED_POOL } from "@/lib/near/config";
-import { checkRecipient, deliveredOnChain, instantStNearEligible } from "@/lib/near/reads";
+import { checkRecipient, deliveredOnChain, instantStNearEligible, nearClient } from "@/lib/near/reads";
 import { getStatus, listTokens, requestQuote, submitDepositTx } from "@/lib/oneclick/client";
-import { buildInboundQuoteRequest, quoteDeadline } from "@/lib/oneclick/quote";
+import { addressInactiveAt, buildInboundQuoteRequest, deadlineMsFor, payCutoffMs, quoteDeadline } from "@/lib/oneclick/quote";
 import { SIM_OUTCOMES, simulatedStatuses, type SimOutcome } from "@/lib/oneclick/simulate";
-import { deliveryTxHash, depositTxHashes, fundsView, isTerminal, phaseOf, reportedDelivery, type Phase } from "@/lib/oneclick/status";
+import { deliveryTxHash, depositTxHashes, fundsView, isFinal, isTerminal, phaseOf, reportedDelivery, type Phase } from "@/lib/oneclick/status";
 import type { QuoteRequest, QuoteResponse, StatusResponse } from "@/lib/oneclick/types";
 import { connectPayer, PAYER_LABEL, type Payer } from "@/lib/pay";
-import { clock, duration, formatNear, formatUnits, money, parseUnits, percent, shortAccount } from "@/lib/format";
-import { stakeAmountAfterDelivery } from "@/lib/stakeAmount";
+import { ago, clock, dateTime, duration, formatNear, formatUnits, money, parseUnits, percent, shortAccount } from "@/lib/format";
+import { stakeAmountAfterDelivery, type StakeAmount } from "@/lib/stakeAmount";
 import {
-  DEFAULT_RESERVE, LIQUID_OPTIONS, MIN_STAKE, liquidStaking, nativeStaking, poolStatus, refusalText, stakingErrorText,
+  LIQUID_OPTIONS, MIN_STAKE, liquidStaking, nativeStaking, poolStatus, refusalText, stakeOverhead, stakingErrorText,
   type LiquidPreset, type LiquidStakeQuote, type NearPoolInfo, type NearStakeQuote,
 } from "@/lib/staking";
 import { DRY_REFUND } from "@/lib/dryrun";
@@ -119,8 +119,14 @@ export function StakeFlow() {
         const p = await nativeStaking(demo).getPool(target.pool);
         if (!p.eligible) throw new Error(`${target.pool} can't take stake right now: ${p.refusals.map(refusalText).join(", ")}.`);
       }
-      const req = buildInboundQuoteRequest({ target: target.kind === "stnear" ? "stnear" : "near", originAsset: asset.assetId, amount, recipient, refundTo: refund, dry: dryRun });
-      const res = await requestQuote(req, { dryRun, direction: "inbound" });
+      if (target.kind === "liquid") {
+        // the same for the token contract: a paused one or an upgrade the module has no pin for can't mint
+        const info = await liquidStaking(demo, target.preset).getPoolInfo();
+        if (info.paused) throw new Error(`${info.name} is paused right now, so the delivery couldn't be staked. Pick a validator pool instead.`);
+        if (!info.codeHashKnown) throw new Error(`${info.contract} runs code this app doesn't know yet (an upgrade), so it won't stake into it. Pick a validator pool instead.`);
+      }
+      const req = buildInboundQuoteRequest({ target: target.kind === "stnear" ? "stnear" : "near", originAsset: asset.assetId, amount, recipient, refundTo: refund, dry: dryRun, deadlineMs: deadlineMsFor(asset.chain) });
+      const res = await requestQuote(req, { dryRun, direction: "inbound", depositAddressValid: (a) => looksLikeAddress(asset.chain, a) });
       const flowId = newId();
       const record: FlowRecord = {
         id: flowId,
@@ -157,6 +163,7 @@ export function StakeFlow() {
         asset={asset}
         target={target}
         recipient={quote.req.recipient}
+        record={resumed && resumed.r.id === quote.flowId ? resumed.r : null}
         payer={payer}
         connectingPayer={connectingPayer}
         onConnectPayer={asset.family ? () => void connect() : null}
@@ -243,7 +250,11 @@ export function StakeFlow() {
             <span className="text-sm text-muted">Refund address on {asset?.chainLabel ?? "the source chain"}</span>
             <input
               value={refundTo}
-              onChange={(e) => setRefundTo(e.target.value)}
+              onChange={(e) => {
+                setRefundTo(e.target.value);
+                // a ticked "my own wallet" vouched for the old text, not this one
+                setOwnWallet(false);
+              }}
               placeholder={dryRun ? (asset?.family && DRY_REFUND[asset.family] ? "optional in dry run (a burn address stands in)" : "needed even in dry run for this chain") : "your own wallet address"}
               spellCheck={false}
               className="rounded-xl border border-line bg-surface-2 px-3 py-2.5 font-mono text-sm outline-none focus:border-accent"
@@ -285,9 +296,13 @@ export function StakeFlow() {
           balances={new Map()}
           hint="Wallets on EVM chains, Solana, TON, Tron and Bitcoin can pay directly; every chain can be paid by hand to the deposit address."
           onPick={(t) => {
-            setAsset(t as SourceAsset);
-            if (payer && payer.family !== (t as SourceAsset).family) setPayer(null);
-            setRefundTo("");
+            const next = t as SourceAsset;
+            setAsset(next);
+            const keep = !!payer && payer.family === next.family;
+            if (payer && !keep) setPayer(null);
+            // same wallet family: refunds still go back to the connected payer (and "Use my wallet" stays hidden for it)
+            setRefundTo(keep ? payer!.address : "");
+            setOwnWallet(false);
             setSheet(null);
           }}
           onClose={() => setSheet(null)}
@@ -313,9 +328,12 @@ function Facts() {
   return (
     <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4 text-sm text-muted">
       <p className="font-medium text-text">Good to know</p>
-      <p>An epoch is ~6.9 h. Native unstaking takes 4 epochs: about 21–28 h.</p>
+      <p>An epoch is about 7 h (43 200 blocks; the clock on Positions is measured). Native unstaking takes 4 epoch boundaries: about 21–28 h.</p>
       <p>rNEAR and LiNEAR unstake in 4–5+ epochs (≈ 21–35 h or more); the exact epoch shows after you unstake.</p>
-      <p>0.02 NEAR stays on your account for gas. A brand-new implicit account is created by the delivery itself.</p>
+      <p>
+        About 0.05 NEAR stays on your account so you can unstake later: NEAR holds back a transaction&apos;s prepaid gas when it accepts it and refunds the unused part seconds later. A
+        brand-new implicit account is created by the delivery itself.
+      </p>
       <p>Only the NEAR delivered by this swap is staked, never what was already on your account.</p>
     </div>
   );
@@ -408,7 +426,10 @@ function InstantCard({ recipient }: { recipient: string | null }) {
   return (
     <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4 text-sm">
       <p className="font-medium">Meta Pool stNEAR, delivered straight by 1Click</p>
-      <p className="text-muted">No NEAR signature at all. It costs more: measured 0.6–0.75 % less than minting stNEAR yourself. Instant unstake later uses Meta Pool&apos;s own live discount.</p>
+      <p className="text-muted">
+        No NEAR signature at all. It costs more than staking yourself: the quote shows exactly how much stNEAR arrives, so compare it with a NEAR quote for the same amount.
+        Instant unstake later uses Meta Pool&apos;s own live discount.
+      </p>
       {el.loading ? <Spinner /> : el.data?.ok ? <Pill tone="accent">{recipient} can receive stNEAR</Pill> : <p className="text-warn">{el.data?.reason ?? el.error} Pick a validator pool or rNEAR instead.</p>}
     </div>
   );
@@ -423,6 +444,7 @@ function QuoteAndTrack({
   asset,
   target,
   recipient,
+  record,
   payer,
   connectingPayer,
   onConnectPayer,
@@ -434,6 +456,8 @@ function QuoteAndTrack({
   asset: SourceAsset;
   target: Target;
   recipient: string;
+  /** The History record when the flow was reopened: its state wins until a fresh 1Click answer arrives. */
+  record: FlowRecord | null;
   payer: Payer | null;
   connectingPayer: boolean;
   onConnectPayer: (() => void) | null;
@@ -445,22 +469,27 @@ function QuoteAndTrack({
   const now = useNow(1000);
   const [liveStatus, setStatus] = useState<StatusResponse | null>(null);
   const [sim, setSim] = useState<{ outcome: SimOutcome; step: number; startedAt: number } | null>(null);
-  const [stakeState, setStake] = useState<"none" | "ready" | "signing" | "done" | "failed">("none");
+  // a reopened flow that was already staked stays staked: no second "Sign and stake" for the same delivery
+  const [stakeState, setStake] = useState<"none" | "ready" | "signing" | "done" | "failed">(record?.staked ? "done" : "none");
+  // paid from a connected wallet: the Pay button and the address don't come back until 1Click says it still waits
+  const [paidAt, setPaidAt] = useState<number | null>(record?.paidAt ?? null);
   const status = useMemo(() => {
     if (!sim) return liveStatus;
     const list = simulatedStatuses(res, sim.outcome);
     return list[Math.min(sim.step, list.length - 1)]!;
   }, [sim, res, liveStatus]);
   const deadline = isDry ? (sim?.outcome === "expired" ? sim.startedAt + 4000 : null) : quoteDeadline(res);
-  const phase: Phase = phaseOf(status, { deadlineMs: deadline, now });
+  const inactiveAt = isDry ? null : addressInactiveAt(res);
+  const phase: Phase = phaseOf(status, { deadlineMs: deadline, now, resumed: !!record && !sim });
   const instant = target.kind === "stnear";
   const stake = phase === "delivered" && stakeState === "none" && !instant ? "ready" : stakeState;
   const out = BigInt(res.quote.amountOut);
   const outDecimals = 24;
+  const cutoff = payCutoffMs(asset.chain);
 
-  // live: poll 1Click every 5 s until the swap settles
+  // live: poll 1Click every 5 s until it gives a final answer; past our deadline once a minute, in case it saw a deposit late
   useEffect(() => {
-    if (stage !== "track" || isDry || !res.quote.depositAddress || isTerminal(phase)) return;
+    if (stage !== "track" || isDry || !res.quote.depositAddress || isFinal(phase)) return;
     let live = true;
     const tick = async () => {
       try {
@@ -476,12 +505,13 @@ function QuoteAndTrack({
       }
     };
     void tick();
-    const t = setInterval(() => void tick(), 5000);
+    const t = setInterval(() => void tick(), phase === "expired" ? 60_000 : 5000);
     return () => {
       live = false;
       clearInterval(t);
     };
   }, [stage, isDry, res, phase, quote.flowId, asset.chain]);
+
 
   // dry run: replay recorded-shape statuses, labeled as simulated
   useEffect(() => {
@@ -529,7 +559,7 @@ function QuoteAndTrack({
           {!instant && (
             <Row label="Then staked" hint="one signature after delivery">
               exactly what arrives, minus gas if the account is new
-              <span className="block text-xs text-muted">into {targetLabel(target)} · 0.02 NEAR stays for gas</span>
+              <span className="block text-xs text-muted">into {targetLabel(target)} · about 0.05 NEAR stays so you can unstake later</span>
             </Row>
           )}
           <Row label="Fees">
@@ -604,7 +634,7 @@ function QuoteAndTrack({
                 near: deliveryTxHash(status) ? <TxLink chain="near:mainnet" hash={deliveryTxHash(status)!} className="text-xs" /> : null,
               }}
             />
-            {!isDry && phase === "awaiting-deposit" && (
+            {!isDry && phase === "awaiting-deposit" && !paidAt && (
               <DepositPanel
                 quote={res}
                 dryRun={dryRun}
@@ -612,33 +642,78 @@ function QuoteAndTrack({
                 payer={payer && payer.family === asset.family ? payer : null}
                 connecting={connectingPayer}
                 onConnectPayer={onConnectPayer}
+                cutoffMs={cutoff}
                 onPaid={(hash) => {
-                  updateFlow(quote.flowId, { addTx: { chain: asset.chain, hash, label: "Deposit" } });
+                  const at = Date.now();
+                  setPaidAt(at);
+                  updateFlow(quote.flowId, { paidAt: at, addTx: { chain: asset.chain, hash, label: "Deposit" } });
                   void submitDepositTx({ txHash: hash, depositAddress: res.quote.depositAddress!, memo: res.quote.depositMemo });
                 }}
               />
             )}
-            {phase === "incomplete-deposit" && <TopUp res={res} status={status} asset={asset} left={left} />}
-            {(phase === "refunded" || phase === "failed" || phase === "expired") && (
-              <Banner tone="danger" title={phase === "expired" ? "Quote expired" : phase === "refunded" ? "Refunded" : "Swap failed"}>
-                {phase === "refunded" && status?.swapDetails.refundedAmount
+            {!isDry && phase === "awaiting-deposit" && paidAt && (
+              <Banner tone="accent" title="Payment sent: waiting for 1Click to see it">
+                Your wallet sent the deposit {ago(paidAt)}. Don&apos;t pay again: the status above moves on once 1Click indexes it (a few minutes on slow chains).
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPaidAt(null);
+                    updateFlow(quote.flowId, { paidAt: null });
+                  }}
+                  className="mt-2 block text-xs text-muted underline"
+                >
+                  The payment failed in my wallet: show the deposit again
+                </button>
+              </Banner>
+            )}
+            {phase === "unknown" && (
+              <Banner tone="warn" title={status ? `1Click says ${status.status}` : "Checking the swap status"}>
+                {status
+                  ? "This app doesn't know that status, so nothing is offered to pay or stake. The signed quote is in History; 1Click support can look it up by the deposit address."
+                  : "Asking 1Click where this swap is. Nothing can be paid or staked until it answers."}
+              </Banner>
+            )}
+            {phase === "incomplete-deposit" && <TopUp res={res} status={status} asset={asset} refundTo={quote.req.refundTo} left={left} />}
+            {phase === "refunded" && (
+              <Banner tone="danger" title="Refunded">
+                {status?.swapDetails.refundedAmount
                   ? `${formatUnits(BigInt(status.swapDetails.refundedAmount), asset.decimals)} ${asset.symbol} went back to ${shortAccount(quote.req.refundTo)}${status.swapDetails.refundReason ? ` (${status.swapDetails.refundReason})` : ""}.`
-                  : `Anything deposited goes back to ${shortAccount(quote.req.refundTo)} on ${asset.chainLabel}, minus the refund fee.`}{" "}
+                  : `The deposit went back to ${shortAccount(quote.req.refundTo)} on ${asset.chainLabel}, minus the refund fee.`}{" "}
                 Nothing reached NEAR, so there is nothing to unstake.
               </Banner>
             )}
-            {!instant && phase === "delivered" && (
-              <StakeStep target={target} recipient={recipient} status={status} simulated={!!sim} flowId={quote.flowId} stake={stake} setStake={setStake} />
+            {phase === "failed" && (
+              <Banner tone="danger" title="1Click reports the swap failed">
+                Check {shortAccount(quote.req.refundTo)} on {asset.chainLabel} for a refund. If nothing arrives, contact 1Click support with the deposit address{" "}
+                <span className="break-all font-mono text-xs">{res.quote.depositAddress}</span>; the signed quote is saved in History.
+              </Banner>
+            )}
+            {phase === "expired" && (
+              <Banner tone="danger" title="Deadline passed">
+                No full deposit arrived in time. Anything sent goes back to {shortAccount(quote.req.refundTo)} on {asset.chainLabel}, minus the refund fee. This page keeps asking 1Click
+                once a minute in case it saw a deposit late.
+              </Banner>
+            )}
+            {!instant && phase === "delivered" && stakeState === "done" && record?.staked && (
+              <Banner tone="accent" title="Already staked">
+                {formatNear(BigInt(record.staked))} of this delivery is staked in {targetLabel(target)}. See it under Positions.
+              </Banner>
+            )}
+            {!instant && phase === "delivered" && !(stakeState === "done" && record?.staked) && (
+              <StakeStep target={target} recipient={recipient} status={status} simulated={!!sim} flowId={quote.flowId} attemptedAt={record?.stakeAttemptAt ?? null} stake={stake} setStake={setStake} />
             )}
           </>
         )}
       </Panel>
       <aside className="flex flex-col gap-3">
-        {left !== null && !isTerminal(phase) && phase !== "processing" && (
+        {left !== null && !isTerminal(phase) && phase !== "processing" && phase !== "unknown" && (
           <div className="rounded-2xl border border-line bg-surface p-4">
             <p className="text-xs text-muted">Deposit deadline</p>
-            <p className={`font-mono text-2xl tabular-nums ${left < 5 * 60_000 ? "text-danger" : ""}`}>{left > 0 ? clock(left) : "passed"}</p>
-            <p className="text-xs text-muted">A deposit after it is refunded (minus the refund fee).</p>
+            <p className={`font-mono text-2xl tabular-nums ${left < cutoff ? "text-danger" : ""}`}>{left > 0 ? clock(left) : "passed"}</p>
+            <p className="text-xs text-muted">
+              The refund begins then: a deposit after it is refunded (minus the refund fee). Paying stops {Math.round(cutoff / 60_000)} min before it.
+              {inactiveAt !== null && inactiveAt > (deadline ?? 0) ? ` The address goes inactive later, at ${dateTime(inactiveAt)}: never send to it after that.` : ""}
+            </p>
           </div>
         )}
         <Facts />
@@ -662,19 +737,30 @@ function ExchangeWarnings({ asset, memo }: { asset: SourceAsset; memo: string | 
   );
 }
 
-function TopUp({ res, status, asset, left }: { res: QuoteResponse; status: StatusResponse | null; asset: SourceAsset; left: number | null }) {
+/**
+ * Less than quoted arrived. 1Click's docs say only that an EXACT_INPUT deposit below amountIn is
+ * refunded by the deadline, so no top-up is suggested: the user waits for the refund and quotes again.
+ */
+function TopUp({ res, status, asset, refundTo, left }: { res: QuoteResponse; status: StatusResponse | null; asset: SourceAsset; refundTo: string; left: number | null }) {
   const got = status?.swapDetails.depositedAmount ? BigInt(status.swapDetails.depositedAmount) : 0n;
-  const need = BigInt(res.quote.amountIn) - got;
   return (
-    <Banner tone="warn" title="Top up the difference">
-      {formatUnits(got, asset.decimals)} {asset.symbol} arrived of {formatUnits(BigInt(res.quote.amountIn), asset.decimals)}. Send{" "}
-      <b>
-        {formatUnits(need > 0n ? need : 0n, asset.decimals)} {asset.symbol}
-      </b>{" "}
-      more to the same deposit address{left !== null && left > 0 ? ` within ${clock(left)}` : ""}, or let it be refunded at the deadline.
+    <Banner tone="warn" title="Less than quoted arrived">
+      {formatUnits(got, asset.decimals)} {asset.symbol} arrived of {formatUnits(BigInt(res.quote.amountIn), asset.decimals)} (an exchange may have taken its fee). 1Click refunds it to{" "}
+      {shortAccount(refundTo)} at the deadline{left !== null && left > 0 ? `, in ${clock(left)}` : ""}, minus the refund fee. Then start a new quote and send the exact amount from a
+      wallet.
     </Banner>
   );
 }
+
+/** What the account holds in the target now: staked NEAR in the pool, or the liquid token's base units. */
+async function heldInTarget(target: Target, native: ReturnType<typeof nativeStaking>, liquid: ReturnType<typeof liquidStaking> | null): Promise<bigint> {
+  if (liquid) return (await liquid.getAccountDetails()).shares;
+  const pool = (target as { pool: string }).pool;
+  const p = (await native.getStakedBalance()).positions.find((x) => x.pool === pool);
+  return p?.staked ?? 0n;
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function StakeStep({
   target,
@@ -682,6 +768,7 @@ function StakeStep({
   status,
   simulated,
   flowId,
+  attemptedAt,
   stake,
   setStake,
 }: {
@@ -690,6 +777,8 @@ function StakeStep({
   status: StatusResponse | null;
   simulated: boolean;
   flowId: string;
+  /** A stake was signed for this delivery earlier and its result was never confirmed (from History). */
+  attemptedAt: number | null;
   stake: "none" | "ready" | "signing" | "done" | "failed";
   setStake: (s: "none" | "ready" | "signing" | "done" | "failed") => void;
 }) {
@@ -698,38 +787,53 @@ function StakeStep({
   const account = signing ? near!.account : demo;
   const native = useMemo(() => nativeStaking(account), [account]);
   const liquid = useMemo(() => (target.kind === "liquid" ? liquidStaking(account, target.preset) : null), [account, target]);
+  const [amount, setAmount] = useState<StakeAmount | null>(null);
+  const [amountErr, setAmountErr] = useState("");
   const [preflight, setPreflight] = useState<NearStakeQuote | LiquidStakeQuote | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [hash, setHash] = useState<string | null>(null);
+  const [staked, setStaked] = useState<bigint | null>(null);
+  // a stake from an earlier visit may have landed: signing again needs the user to have checked
+  const [unconfirmed, setUnconfirmed] = useState<number | null>(attemptedAt);
+  const [checkedNotStaked, setCheckedNotStaked] = useState(false);
   const once = useRef(false);
 
-  const simulatedFee = useCallback(async (): Promise<bigint> => {
-    try {
-      const probe = liquid ? await liquid.quoteStake({ amount: MIN_STAKE }) : await native.quoteStake({ amount: MIN_STAKE, pool: (target as { pool: string }).pool });
-      return probe.fee;
-    } catch {
-      return liquid ? 11n * 10n ** 21n : 6n * 10n ** 21n; // the fee bounds measured on 2026-11-08, if the demo account can't quote
-    }
-  }, [liquid, native, target]);
-
-  // exactly what was delivered, capped by what the account can spend (critique #2)
-  const amount = useAsync(async () => {
+  // exactly what was delivered, capped by what the account can spend now (critique #2); read fresh for every preflight
+  const computeAmount = useCallback(async (): Promise<StakeAmount> => {
     const reported = reportedDelivery(status);
     const delivery = deliveryTxHash(status);
     const onChain = !simulated && delivery ? await deliveredOnChain(delivery, recipient) : null;
-    // a simulated delivery never reached the account: assume a brand-new implicit account that keeps the
-    // reserve, pays the module's own fee bound (read from a quote on the demo account) and its storage
-    const maxStakeable = simulated ? (reported ?? 0n) - DEFAULT_RESERVE - FRESH_ACCOUNT_STORAGE - (await simulatedFee()) : liquid ? await liquid.getMaxStakeable() : await native.getMaxStakeable();
+    // a simulated delivery never reached the account: a brand-new implicit account keeps its storage plus
+    // what the module keeps back (the stake's upfront gas and the reserve that pays for the exit)
+    const maxStakeable = simulated
+      ? (reported ?? 0n) - FRESH_ACCOUNT_STORAGE - (await stakeOverhead(liquid ?? native, nearClient().rpc))
+      : liquid
+        ? await liquid.getMaxStakeable()
+        : await native.getMaxStakeable();
     return stakeAmountAfterDelivery({ reported, onChain, maxStakeable, minStake: MIN_STAKE });
-  }, [status, simulated, recipient, native, liquid, simulatedFee]);
+  }, [status, simulated, recipient, native, liquid]);
 
   const runPreflight = useCallback(async () => {
-    if (!amount.data || amount.data.tooSmall) return;
     setErr("");
+    setAmountErr("");
     setBusy(true);
     try {
-      const q = liquid ? await liquid.quoteStake({ amount: amount.data.amount }) : await native.quoteStake({ amount: amount.data.amount, pool: (target as { pool: string }).pool });
+      let a: StakeAmount;
+      try {
+        a = await computeAmount();
+        setAmount(a);
+      } catch (e) {
+        setAmount(null);
+        setPreflight(null);
+        setAmountErr(stakingErrorText(e));
+        return;
+      }
+      if (a.tooSmall) {
+        setPreflight(null);
+        return;
+      }
+      const q = liquid ? await liquid.quoteStake({ amount: a.amount }) : await native.quoteStake({ amount: a.amount, pool: (target as { pool: string }).pool });
       setPreflight(q);
     } catch (e) {
       setPreflight(null);
@@ -737,28 +841,56 @@ function StakeStep({
     } finally {
       setBusy(false);
     }
-  }, [amount.data, liquid, native, target]);
+  }, [computeAmount, liquid, native, target]);
 
   useEffect(() => {
-    if (amount.data && !once.current) {
-      once.current = true;
-      void runPreflight();
-    }
-  }, [amount.data, runPreflight]);
+    if (once.current) return;
+    once.current = true;
+    void runPreflight();
+  }, [runPreflight]);
+
+  const markStaked = (value: bigint, txHash: string | null) => {
+    setStaked(value);
+    setHash(txHash);
+    setUnconfirmed(null);
+    updateFlow(flowId, { staked: value.toString(), stakeAttemptAt: null, ...(txHash ? { addTx: { chain: "near:mainnet", hash: txHash, label: "Stake" } } : {}) });
+    setStake("done");
+  };
 
   const sign = async () => {
-    if (!preflight || !amount.data) return;
+    if (!preflight || !amount) return;
     setErr("");
     setStake("signing");
+    // what the target holds before: if the wallet errors after broadcasting, the chain still tells whether it landed
+    const before = await heldInTarget(target, native, liquid).catch(() => null);
+    const expectedGain = liquid ? (preflight as LiquidStakeQuote).shares : amount.amount;
+    updateFlow(flowId, { stakeAttemptAt: Date.now() });
     try {
       const r = liquid
-        ? await liquid.stake({ amount: amount.data.amount, expected: preflight.transactions })
-        : await native.stake({ amount: amount.data.amount, pool: (target as { pool: string }).pool, expected: preflight.transactions });
-      setHash(r.hash);
-      updateFlow(flowId, { staked: amount.data.amount.toString(), addTx: { chain: "near:mainnet", hash: r.hash, label: "Stake" } });
-      setStake("done");
+        ? await liquid.stake({ amount: amount.amount, expected: preflight.transactions })
+        : await native.stake({ amount: amount.amount, pool: (target as { pool: string }).pool, expected: preflight.transactions });
+      markStaked(amount.amount, r.hash);
     } catch (e) {
-      setErr(stakingErrorText(e));
+      const rejected = (e as { name?: string })?.name === "UserRejectedError";
+      if (rejected) {
+        updateFlow(flowId, { stakeAttemptAt: null });
+        setErr("You cancelled in the wallet. Nothing was sent.");
+        setStake("failed");
+        return;
+      }
+      // any other error may come after the broadcast: look at the chain twice before offering to sign again
+      setErr(`${stakingErrorText(e)} Checking the chain before you can try again…`);
+      for (let i = 0; i < 2 && before !== null; i++) {
+        await sleep(6000);
+        const after = await heldInTarget(target, native, liquid).catch(() => null);
+        if (after !== null && after - before >= (expectedGain * 999n) / 1000n) {
+          markStaked(amount.amount, null);
+          return;
+        }
+      }
+      setUnconfirmed(before === null ? Date.now() : null);
+      setPreflight(null);
+      setErr(`${stakingErrorText(e)} ${before === null ? "The position couldn't be read, so check Positions before you sign again." : "The stake isn't on chain after 12 s. Preflight again to retry."}`);
       setStake("failed");
     }
   };
@@ -766,24 +898,26 @@ function StakeStep({
   if (stake === "done")
     return (
       <Banner tone="accent" title="Staked">
-        {amount.data && formatNear(amount.data.amount)} is staked in {targetLabel(target)}. {hash && <TxLink chain="near:mainnet" hash={hash} />} See it under Positions.
+        {formatNear(staked ?? amount?.amount ?? 0n)} is staked in {targetLabel(target)}. {hash && <TxLink chain="near:mainnet" hash={hash} />} See it under Positions.
       </Banner>
     );
 
+  const blocked = unconfirmed !== null && !checkedNotStaked;
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-accent/40 bg-accent/5 p-4">
       <p className="font-medium">Stake what arrived</p>
-      {amount.data ? (
+      {amount ? (
         <Rows>
-          <Row label="Delivered" hint={amount.data.basis === "on-chain" ? "read from the NEAR transaction" : "as 1Click reports it"}>
+          <Row label="Delivered" hint={amount.basis === "on-chain" ? "read from the NEAR transaction" : "as 1Click reports it"}>
             {reportedDelivery(status) !== null ? formatNear(reportedDelivery(status)!, 5) : "—"}
+            {amount.mismatch && <span className="block text-xs text-warn">the NEAR transaction and 1Click differ: the lower figure is staked</span>}
           </Row>
-          <Row label="Will stake" hint={amount.data.capped ? "capped by what the account can spend" : "exactly the delivery"}>
-            <span className="font-semibold text-accent">{amount.data.tooSmall ? "too small to stake" : formatNear(amount.data.amount, 5)}</span>
+          <Row label="Will stake" hint={amount.capped ? "capped by what the account can spend" : "exactly the delivery"}>
+            <span className="font-semibold text-accent">{amount.tooSmall ? "too small to stake" : formatNear(amount.amount, 5)}</span>
           </Row>
         </Rows>
-      ) : amount.error ? (
-        <p className="text-sm text-danger">{amount.error}</p>
+      ) : amountErr ? (
+        <p className="text-sm text-danger">{amountErr}</p>
       ) : (
         <Spinner />
       )}
@@ -791,7 +925,8 @@ function StakeStep({
         <>
           <TxPreview transactions={preflight.transactions} />
           <p className="text-xs text-muted">
-            Network fee at most {formatNear(preflight.fee, 5)} (unused gas is refunded){preflight.apr !== null ? ` · APR ${percent(preflight.apr)}` : ""}
+            Network fee at most {formatNear(preflight.fee, 5)} · {formatNear(preflight.upfront, 4)} held back for gas while it runs (refunded) · {formatNear(preflight.reserve, 4)} stays
+            on the account for the unstake{preflight.apr !== null ? ` · APR ${percent(preflight.apr)}` : ""}
           </p>
           {preflight.warnings.map((w) => (
             <p key={w.code} className="text-sm text-warn">
@@ -800,17 +935,26 @@ function StakeStep({
           ))}
         </>
       )}
-      {err && <Banner tone={simulated ? "warn" : "danger"} title={simulated ? "Preflight on the demo account" : "Preflight refused"}>{err}{simulated ? " In a live run the delivery itself funds the stake." : ""}</Banner>}
+      {unconfirmed !== null && (
+        <Banner tone="warn" title="A stake may already have gone through">
+          A stake for this delivery was signed {ago(unconfirmed)} and its result wasn&apos;t confirmed. Check Positions first: signing again would stake other NEAR on the account.
+          <label className="mt-2 flex items-start gap-2 text-sm">
+            <input type="checkbox" checked={checkedNotStaked} onChange={(e) => setCheckedNotStaked(e.target.checked)} className="mt-1 accent-[var(--accent)]" />
+            <span>I checked Positions: this delivery is not staked.</span>
+          </label>
+        </Banner>
+      )}
+      {err && <Banner tone={simulated ? "warn" : "danger"} title={simulated ? "Preflight on the demo account" : stake === "signing" ? "Wallet error" : "Preflight refused"}>{err}{simulated ? " In a live run the delivery itself funds the stake." : ""}</Banner>}
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={() => void runPreflight()} disabled={busy || !amount.data} className="btn-tactile px-4 py-2.5 text-sm font-medium">
+        <button type="button" onClick={() => void runPreflight()} disabled={busy || stake === "signing"} className="btn-tactile px-4 py-2.5 text-sm font-medium">
           {busy ? "Checking…" : "Preflight again"}
         </button>
-        <button type="button" onClick={() => void sign()} disabled={!signing || !preflight || stake === "signing"} className="btn-tactile-accent px-4 py-2.5 text-sm" title={signing ? undefined : "Dry run / demo account: nothing to sign"}>
+        <button type="button" onClick={() => void sign()} disabled={!signing || !preflight || stake === "signing" || busy || blocked} className="btn-tactile-accent px-4 py-2.5 text-sm" title={signing ? undefined : "Dry run / demo account: nothing to sign"}>
           {stake === "signing" ? "Confirm in your wallet…" : "Sign and stake"}
         </button>
       </div>
       <p className="text-xs text-muted">
-        Preflight runs the module&apos;s quote: pool code, pause, fee, validator set and balances are read fresh, and the exact transaction is shown. NEAR has no
+        Preflight runs the module&apos;s quote: the delivered amount, pool code, pause, fee, validator set and balances are read fresh, and the exact transaction is shown. NEAR has no
         transaction simulation, so nothing is executed until you sign; the signed transaction must equal this preview.
       </p>
     </div>

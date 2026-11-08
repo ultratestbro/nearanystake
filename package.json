@@ -14,8 +14,8 @@
   },
   "dependencies": {
     "@anywalletkit/core": "0.8.0",
-    "@anywalletkit/protocol-staking-liquid-near": "file:vendor/anywalletkit-protocol-staking-liquid-near-0.0.0-4c3bc64f.tgz",
-    "@anywalletkit/protocol-staking-native-near": "file:vendor/anywalletkit-protocol-staking-native-near-0.0.0-4c3bc64f.tgz",
+    "@anywalletkit/protocol-staking-liquid-near": "file:vendor/anywalletkit-protocol-staking-liquid-near-0.0.0-a623937a.tgz",
+    "@anywalletkit/protocol-staking-native-near": "file:vendor/anywalletkit-protocol-staking-native-near-0.0.0-a623937a.tgz",
     "@anywalletkit/swap2-assets": "0.2.2",
     "@anywalletkit/wallet-near": "0.4.0",
     "@anywalletkit/wallet-solana": "0.6.0",

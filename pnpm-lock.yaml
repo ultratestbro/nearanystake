@@ -16,11 +16,11 @@ importers:
         specifier: 0.8.0
         version: 0.8.0
       '@anywalletkit/protocol-staking-liquid-near':
-        specifier: file:vendor/anywalletkit-protocol-staking-liquid-near-0.0.0-4c3bc64f.tgz
-        version: file:vendor/anywalletkit-protocol-staking-liquid-near-0.0.0-4c3bc64f.tgz(@anywalletkit/core@0.8.0)
+        specifier: file:vendor/anywalletkit-protocol-staking-liquid-near-0.0.0-a623937a.tgz
+        version: file:vendor/anywalletkit-protocol-staking-liquid-near-0.0.0-a623937a.tgz(@anywalletkit/core@0.8.0)
       '@anywalletkit/protocol-staking-native-near':
-        specifier: file:vendor/anywalletkit-protocol-staking-native-near-0.0.0-4c3bc64f.tgz
-        version: file:vendor/anywalletkit-protocol-staking-native-near-0.0.0-4c3bc64f.tgz(@anywalletkit/core@0.8.0)
+        specifier: file:vendor/anywalletkit-protocol-staking-native-near-0.0.0-a623937a.tgz
+        version: file:vendor/anywalletkit-protocol-staking-native-near-0.0.0-a623937a.tgz(@anywalletkit/core@0.8.0)
       '@anywalletkit/swap2-assets':
         specifier: 0.2.2
         version: 0.2.2
@@ -147,15 +147,15 @@ packages:
     resolution: {integrity: sha512-URUfrJW/c5p0zTM8fpSV0lf3brim052i4xdzIyNBwHhAMjQ0gVGrKZKDd91j6HWhLJH1aABGcVkGQzco6meIxw==}
     engines: {node: '>=22'}
 
-  '@anywalletkit/protocol-staking-liquid-near@file:vendor/anywalletkit-protocol-staking-liquid-near-0.0.0-4c3bc64f.tgz':
-    resolution: {integrity: sha512-nET7HF8VXV83zJIYf2JLlpujyY9j7wbaSQM7u8leBA54T68M/jdg8pp4B7SbLokW0/yUfJjXr/7Og/8h6ZKWGg==, tarball: file:vendor/anywalletkit-protocol-staking-liquid-near-0.0.0-4c3bc64f.tgz}
+  '@anywalletkit/protocol-staking-liquid-near@file:vendor/anywalletkit-protocol-staking-liquid-near-0.0.0-a623937a.tgz':
+    resolution: {integrity: sha512-PkaJTUfcX/5eEHBMGbHN0Xw3T/aLWk1JmQDxq/DeQmLMRe2QE0pxreDsRFq0EBhoA3SGmwtmd7umbgfeOGbvmQ==, tarball: file:vendor/anywalletkit-protocol-staking-liquid-near-0.0.0-a623937a.tgz}
     version: 0.0.0
     engines: {node: '>=22'}
     peerDependencies:
       '@anywalletkit/core': 0.8.0
 
-  '@anywalletkit/protocol-staking-native-near@file:vendor/anywalletkit-protocol-staking-native-near-0.0.0-4c3bc64f.tgz':
-    resolution: {integrity: sha512-zT1kly2y+nq94nY5Nkl0SAdreFsTKLdvqYwBsY++2tu0RaOLpL6nU+H0SNUVXyAOZHgAwje2cYWUm0FPm+h3tg==, tarball: file:vendor/anywalletkit-protocol-staking-native-near-0.0.0-4c3bc64f.tgz}
+  '@anywalletkit/protocol-staking-native-near@file:vendor/anywalletkit-protocol-staking-native-near-0.0.0-a623937a.tgz':
+    resolution: {integrity: sha512-atxih/ODdGm6/uYHRuIwX0hnCeeJdiHAIlbqPGoyz0rakyZgI9cNQCa17JCvoUjxC6/8hlaMbWv223J+GWBccA==, tarball: file:vendor/anywalletkit-protocol-staking-native-near-0.0.0-a623937a.tgz}
     version: 0.0.0
     engines: {node: '>=22'}
     peerDependencies:
@@ -5415,13 +5415,13 @@ snapshots:
       '@scure/bip32': 2.4.0
       '@scure/bip39': 2.4.0
 
-  '@anywalletkit/protocol-staking-liquid-near@file:vendor/anywalletkit-protocol-staking-liquid-near-0.0.0-4c3bc64f.tgz(@anywalletkit/core@0.8.0)':
+  '@anywalletkit/protocol-staking-liquid-near@file:vendor/anywalletkit-protocol-staking-liquid-near-0.0.0-a623937a.tgz(@anywalletkit/core@0.8.0)':
     dependencies:
       '@anywalletkit/core': 0.8.0
       '@anywalletkit/wallet-near': 0.4.0
       '@noble/hashes': 2.4.0
 
-  '@anywalletkit/protocol-staking-native-near@file:vendor/anywalletkit-protocol-staking-native-near-0.0.0-4c3bc64f.tgz(@anywalletkit/core@0.8.0)':
+  '@anywalletkit/protocol-staking-native-near@file:vendor/anywalletkit-protocol-staking-native-near-0.0.0-a623937a.tgz(@anywalletkit/core@0.8.0)':
     dependencies:
       '@anywalletkit/core': 0.8.0
       '@anywalletkit/wallet-near': 0.4.0

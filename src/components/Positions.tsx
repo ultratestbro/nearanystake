@@ -31,7 +31,9 @@ export function Positions() {
   const [view, setView] = useState<"mine" | "demo">(params.get("view") === "demo" ? "demo" : "mine");
   const effective = view === "mine" && near ? "mine" : "demo";
   const s = useAccountStaking(effective);
-  const positions = useAsync(() => s.native.listPositions(), [s], 60_000);
+  // getStakedBalance, not listPositions: when the pool lookup is down it still shows the known pools and says so
+  const balance = useAsync(() => s.native.getStakedBalance(), [s], 60_000);
+  const positions = { ...balance, data: balance.data?.positions };
   const accountId = s.accountId ?? demoId;
 
   return (
@@ -67,6 +69,11 @@ export function Positions() {
           <ClaimAll native={s.native} readOnly={s.readOnly} positions={positions.data ?? []} onDone={positions.reload} account={accountId} />
         </div>
         {positions.error && <p className="text-sm text-danger">{positions.error}</p>}
+        {balance.data?.partial && (
+          <Banner tone="warn" title="Pool lookup is down">
+            fastnear&apos;s index didn&apos;t answer, so only pools this app already knows are shown. Stake elsewhere is safe; it shows up again once the lookup is back.
+          </Banner>
+        )}
         {!positions.data && !positions.error && <Skeleton className="h-28 w-full" />}
         {positions.data?.length === 0 && <p className="text-sm text-muted">No native stake on this account yet.</p>}
         <div className="grid gap-3 md:grid-cols-2">
@@ -145,6 +152,8 @@ function PositionCard({ p, native, readOnly, account, onDone }: { p: NearPoolPos
 function UnstakeModal({ pool, staked, position, native, readOnly, account, onClose, onDone }: { pool: string; staked: bigint; position: NearPoolPosition; native: NativeStaking; readOnly: boolean; account: string; onClose: () => void; onDone: () => void }) {
   const [text, setText] = useState("");
   const [all, setAll] = useState(true);
+  // the module refuses to restart a running unbonding wait unless the user says so here
+  const [allowTimerReset, setAllowTimerReset] = useState(false);
   const [q, setQ] = useState<NearUnstakeQuote | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -157,7 +166,7 @@ function UnstakeModal({ pool, staked, position, native, readOnly, account, onClo
     if (amount === null) return setErr("Enter an amount.");
     setBusy(true);
     try {
-      setQ(await native.quoteRequestWithdrawal({ amount, pool }));
+      setQ(await native.quoteRequestWithdrawal({ amount, pool, allowTimerReset }));
     } catch (e) {
       setErr(stakingErrorText(e));
     } finally {
@@ -169,7 +178,7 @@ function UnstakeModal({ pool, staked, position, native, readOnly, account, onClo
     setBusy(true);
     setErr("");
     try {
-      const r = await native.requestWithdrawal({ amount, pool, expected: q.transactions });
+      const r = await native.requestWithdrawal({ amount, pool, allowTimerReset, expected: q.transactions });
       setHash(r.hash);
       addRecord({ id: newId(), type: "action", kind: "unstake", createdAt: Date.now(), account, target: pool, amount: q.amount.toString(), txs: r.hashes.map((h) => ({ chain: "near:mainnet", hash: h, label: "Unstake" })) });
       onDone();
@@ -194,7 +203,20 @@ function UnstakeModal({ pool, staked, position, native, readOnly, account, onClo
         {!all && <input value={text} onChange={(e) => setText(e.target.value)} placeholder="NEAR" inputMode="decimal" className="rounded-xl border border-line bg-surface-2 px-3 py-2.5 outline-none focus:border-accent" />}
         {position.unstaked > 0n && !position.canWithdraw && (
           <Banner tone="warn" title="This restarts your unbonding timer">
-            {formatNear(position.unstaked)} is already unbonding here. A new unstake makes all of it wait 4 more epochs (~21–28 h from now).
+            {formatNear(position.unstaked)} is already unbonding here. A new unstake makes all of it wait 4 more epochs (~21–28 h from now). Usually better: wait until it unlocks, withdraw it,
+            then unstake.
+            <label className="mt-2 flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={allowTimerReset}
+                onChange={(e) => {
+                  setAllowTimerReset(e.target.checked);
+                  setQ(null);
+                }}
+                className="mt-1 accent-[var(--accent)]"
+              />
+              <span>Restart the wait for the {formatNear(position.unstaked, 3)} too</span>
+            </label>
           </Banner>
         )}
         {position.unstaked > 0n && position.canWithdraw && (
@@ -216,7 +238,7 @@ function UnstakeModal({ pool, staked, position, native, readOnly, account, onClo
                   {q.unlock.latestAt ? ` – ${dateTime(q.unlock.latestAt)}` : ""}
                 </span>
               </Row>
-              <Row label="Network fee">at most {formatNear(q.fee, 5)}</Row>
+              <Row label="Network fee" hint={`${formatNear(q.upfront, 4)} held back for gas while it runs, refunded`}>at most {formatNear(q.fee, 5)}</Row>
             </Rows>
             {q.warnings.map((w) => (
               <p key={w.code} className="text-sm text-warn">
@@ -286,7 +308,7 @@ function ClaimAll({ native, readOnly, positions, onDone, account }: { native: Na
                 <TxPreview transactions={q.transactions} />
                 <Rows>
                   <Row label="To your account">{formatNear(q.amount)}</Row>
-                  <Row label="Network fee">at most {formatNear(q.fee, 5)}</Row>
+                  <Row label="Network fee" hint={`${formatNear(q.upfront, 4)} held back for gas while it runs, refunded`}>at most {formatNear(q.fee, 5)}</Row>
                 </Rows>
               </>
             )}
@@ -372,14 +394,20 @@ function LiquidModal({ kind, ls, symbol, shares, readOnly, account, onClose, onD
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [hash, setHash] = useState("");
+  // set only after the module refused a timer reset and the user agreed to it
+  const [allowTimerReset, setAllowTimerReset] = useState(false);
+  const [resetRefused, setResetRefused] = useState(false);
   useEffect(() => {
-    (kind === "unstake" ? ls.quoteRequestWithdrawal({ amount: "all" }) : ls.quoteClaimWithdrawals()).then(setQ, (e: unknown) => setErr(stakingErrorText(e)));
-  }, [kind, ls]);
+    (kind === "unstake" ? ls.quoteRequestWithdrawal({ amount: "all", allowTimerReset }) : ls.quoteClaimWithdrawals()).then(setQ, (e: unknown) => {
+      setResetRefused((e as { code?: string })?.code === "timer-reset-refused");
+      setErr(stakingErrorText(e));
+    });
+  }, [kind, ls, allowTimerReset]);
   const sign = async () => {
     if (!q) return;
     setBusy(true);
     try {
-      const r = kind === "unstake" ? await ls.requestWithdrawal({ amount: "all", expected: q.transactions }) : await ls.claimWithdrawals({ expected: q.transactions });
+      const r = kind === "unstake" ? await ls.requestWithdrawal({ amount: "all", allowTimerReset, expected: q.transactions }) : await ls.claimWithdrawals({ expected: q.transactions });
       setHash(r.hash);
       addRecord({ id: newId(), type: "action", kind: kind === "unstake" ? "unstake" : "claim", createdAt: Date.now(), account, target: symbol, amount: q.amount.toString(), txs: [{ chain: "near:mainnet", hash: r.hash, label: kind }] });
       onDone();
@@ -392,19 +420,34 @@ function LiquidModal({ kind, ls, symbol, shares, readOnly, account, onClose, onD
   return (
     <Modal title={kind === "unstake" ? `Unstake all ${symbol}` : `Withdraw from ${symbol}`} onClose={onClose}>
       <div className="flex flex-col gap-3">
-        {kind === "unstake" && <p className="text-sm text-muted">Burns {formatUnits(shares, 24, 4)} {symbol}. Unlocks in at least 4 epochs (~28 h); the contract may add more. The exact epoch shows here after the unstake.</p>}
+        {kind === "unstake" && <p className="text-sm text-muted">Burns {formatUnits(shares, 24, 4)} {symbol}. Unlocks in at least 4 epochs (≈ 21–35 h or more); the contract may add more. The exact epoch shows here after the unstake.</p>}
         {!q && !err && <Spinner />}
         {q && (
           <>
             <TxPreview transactions={q.transactions} />
             <Rows>
               <Row label={kind === "unstake" ? "NEAR unstaking" : "To your account"}>{formatNear(q.amount)}</Row>
-              <Row label="Network fee">at most {formatNear(q.fee, 5)}</Row>
+              <Row label="Network fee" hint={`${formatNear(q.upfront, 4)} held back for gas while it runs, refunded`}>at most {formatNear(q.fee, 5)}</Row>
             </Rows>
             {"warnings" in q && q.warnings.map((w) => <p key={w.code} className="text-sm text-warn">{w.message}</p>)}
           </>
         )}
         {err && <Banner tone="warn">{err}</Banner>}
+        {kind === "unstake" && resetRefused && !allowTimerReset && (
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={allowTimerReset}
+              onChange={(e) => {
+                setErr("");
+                setQ(null);
+                setAllowTimerReset(e.target.checked);
+              }}
+              className="mt-1 accent-[var(--accent)]"
+            />
+            <span>Unstake anyway and restart the wait for what is already unbonding</span>
+          </label>
+        )}
         {hash ? (
           <Banner tone="accent" title="Sent">
             <TxLink chain="near:mainnet" hash={hash} />

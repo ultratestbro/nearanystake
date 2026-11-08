@@ -94,8 +94,13 @@ function PoolRow({ p, loading, onPick, picked, compact }: { p: NearPoolInfo; loa
     <button type="button" aria-pressed={picked} disabled={p.details && !p.eligible} onClick={() => onPick(p)} className="btn-tactile justify-center px-3 py-1.5 text-xs font-medium">
       {picked ? "Picked" : "Pick"}
     </button>
+  ) : p.details && !p.eligible ? (
+    // a link with aria-disabled still navigates: an ineligible pool gets no link at all
+    <span aria-disabled="true" className="btn-tactile justify-center px-3 py-1.5 text-xs font-medium opacity-50">
+      Stake
+    </span>
   ) : (
-    <Link href={`/stake?pool=${encodeURIComponent(p.id)}`} aria-disabled={p.details && !p.eligible} className="btn-tactile justify-center px-3 py-1.5 text-xs font-medium">
+    <Link href={`/stake?pool=${encodeURIComponent(p.id)}`} className="btn-tactile justify-center px-3 py-1.5 text-xs font-medium">
       Stake
     </Link>
   );

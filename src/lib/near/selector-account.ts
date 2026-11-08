@@ -24,10 +24,16 @@ export interface NearTransactionsSender {
 
 export type SelectorAccount = IWalletAccount & NearTransactionsSender;
 
-/** What failed outcomes and rejections look like coming back from Meteor / HERE / Intear. */
-function mapError(e: unknown): Error {
+/**
+ * Only an explicit "the user said no" becomes UserRejectedError. A closed popup or any other error may
+ * come after the wallet broadcast the transaction, so it stays a plain error: the app then checks the
+ * chain before it offers to sign again.
+ */
+const USER_REJECTED = /user (rejected|denied|cancell?ed|declined)|(rejected|denied|cancell?ed|declined) by (the )?user|user_rejected|userrejected/i;
+export function mapError(e: unknown): Error {
   const m = e instanceof Error ? e.message : String(e);
-  if (/reject|denied|cancel|closed|user/i.test(m) && !/insufficient/i.test(m)) return new UserRejectedError(m || "You cancelled in the wallet.");
+  const code = (e as { code?: unknown } | null)?.code;
+  if ((USER_REJECTED.test(m) || code === 4001) && !/insufficient/i.test(m)) return new UserRejectedError(m || "You cancelled in the wallet.");
   return e instanceof Error ? e : new Error(m);
 }
 

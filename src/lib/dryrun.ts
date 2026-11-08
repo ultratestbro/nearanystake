@@ -18,10 +18,13 @@ export function canGoLive(nearAccount: string | null): boolean {
   return !!nearAccount;
 }
 
-/** The mode a page starts in: dry until a wallet is connected, unless the user chose otherwise. */
+/**
+ * The mode a page starts in: dry, also after a wallet connects. Only the user's own choice of the
+ * switch (remembered in this browser) makes quotes payable.
+ */
 export function initialDryRun(nearAccount: string | null, remembered: boolean | null): boolean {
   if (!nearAccount) return true;
-  return remembered ?? false;
+  return remembered ?? true;
 }
 
 /**

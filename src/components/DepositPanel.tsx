@@ -13,7 +13,8 @@ import { Banner } from "./ui";
 
 /**
  * The one-time deposit: pay from a connected wallet, or send it by hand to the address (with QR and
- * memo). Renders nothing payable in dry-run mode or for a dry quote.
+ * memo). Renders nothing payable in dry-run mode or for a dry quote, nor within `cutoffMs` of the
+ * deadline (a deposit 1Click sees after it is refunded, minus the refund fee).
  */
 export function DepositPanel({
   quote,
@@ -22,6 +23,7 @@ export function DepositPanel({
   payer,
   onConnectPayer,
   connecting,
+  cutoffMs,
   onPaid,
 }: {
   quote: QuoteResponse;
@@ -30,6 +32,9 @@ export function DepositPanel({
   payer: Payer | null;
   onConnectPayer: (() => void) | null;
   connecting: boolean;
+  /** Paying stops this long before the deadline. */
+  cutoffMs: number;
+  /** The parent locks the panel away after this: a second payment would be refunded minus the fee. */
   onPaid: (txHash: string) => void;
 }) {
   const address = depositAddressToShow(quote, dryRun);
@@ -51,8 +56,15 @@ export function DepositPanel({
   if (!address) return <Banner title="Dry run">No deposit address is ever shown in dry-run mode. Connect a NEAR wallet and switch to Live to get one.</Banner>;
 
   const left = deadline !== null ? deadline - now : null;
+  if (left !== null && left <= cutoffMs)
+    return (
+      <Banner tone="warn" title={left > 0 ? "Too close to the deadline" : "The deadline passed"}>
+        {left > 0 ? `Only ${clock(left)} left: a deposit sent now may reach 1Click after the refund begins.` : "A deposit now would be refunded (minus the refund fee)."} Don&apos;t send to this
+        address: start a new quote instead.
+      </Banner>
+    );
   const pay = async () => {
-    if (!payer) return;
+    if (!payer || paying) return;
     setErr("");
     setPaying(true);
     try {
@@ -67,6 +79,7 @@ export function DepositPanel({
         validUntilMs: deadline ?? Date.now() + 3_600_000,
       });
       onPaid(hash);
+      return;
     } catch (e) {
       const m = e instanceof Error ? e.message : String(e);
       setErr(/reject|denied|cancel/i.test(m) ? "You cancelled in the wallet." : m);
@@ -78,13 +91,13 @@ export function DepositPanel({
   return (
     <div className="flex flex-col gap-3">
       {left !== null && (
-        <div className={`flex items-center justify-between rounded-xl px-4 py-2.5 text-sm ${left < 5 * 60_000 ? "bg-danger/10 text-danger" : "bg-surface-2"}`}>
-          <span>{left > 0 ? "Deposit before the deadline" : "The deadline passed: a deposit now is refunded"}</span>
-          <span className="font-mono tabular-nums">{left > 0 ? clock(left) : "00:00"}</span>
+        <div className={`flex items-center justify-between rounded-xl px-4 py-2.5 text-sm ${left - cutoffMs < 5 * 60_000 ? "bg-danger/10 text-danger" : "bg-surface-2"}`}>
+          <span>Pay within</span>
+          <span className="font-mono tabular-nums">{clock(left - cutoffMs)}</span>
         </div>
       )}
       {payer ? (
-        <button type="button" onClick={() => void pay()} disabled={paying || (left !== null && left <= 0)} className="btn-tactile-accent justify-center px-4 py-3">
+        <button type="button" onClick={() => void pay()} disabled={paying} className="btn-tactile-accent justify-center px-4 py-3">
           {paying ? "Confirm in your wallet…" : `Pay ${formatUnits(amount, asset.decimals)} ${asset.symbol} from ${payer.label}`}
         </button>
       ) : (
@@ -99,7 +112,7 @@ export function DepositPanel({
         <summary className="cursor-pointer font-medium">Or send it yourself</summary>
         <div className="mt-3 flex flex-col gap-3">
           <p>
-            Send <b>exactly</b> this amount on <b>{asset.chainLabel}</b>. Any wallet works; refunds go to your refund address.
+            Send <b>exactly</b> this amount on <b>{asset.chainLabel}</b>, <b>once</b>. Any wallet works; refunds go to your refund address.
           </p>
           {qr && <div className="mx-auto w-44 rounded-lg bg-white p-2" dangerouslySetInnerHTML={{ __html: qr }} />}
           <Field label="Amount" value={`${plainUnits(amount, asset.decimals)} ${asset.symbol}`} copy={plainUnits(amount, asset.decimals)} />

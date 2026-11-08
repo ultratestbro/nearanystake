@@ -52,6 +52,14 @@ export async function deliveredOnChain(txHash: string, recipient: string, raw = 
   }
 }
 
+/** What the account can spend: amount − locked − storage (10^19 yocto per byte), 0n for an account that doesn't exist yet. */
+export async function nearSpendable(accountId: string, rpc: NearRpc = nearClient().rpc): Promise<bigint> {
+  const v = await rpc.viewAccount(accountId);
+  if (!v) return 0n;
+  const free = BigInt(v.amount) - BigInt(v.locked) - BigInt(v.storage_usage) * 10n ** 19n;
+  return free > 0n ? free : 0n;
+}
+
 /** Native balance, 0n for an account that doesn't exist yet. */
 export async function nearBalance(accountId: string, rpc: NearRpc = nearClient().rpc): Promise<bigint> {
   const v = await rpc.viewAccount(accountId);

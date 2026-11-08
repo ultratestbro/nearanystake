@@ -22,7 +22,7 @@ export function LandingStats() {
       <Stat label="Native staking APR" value={v(stats.data ? stats.data.apr * 0.95 : undefined, stats.error)} hint={stats.data ? `after a 5 % pool fee; network ${percent(stats.data.apr)} gross` : "from the protocol's rewards"} />
       <Stat label="Rhea rNEAR" value={v(rApr.data, rApr.error)} hint="7-day price growth" />
       <Stat label="LiNEAR" value={v(lApr.data, lApr.error)} hint="7-day price growth" />
-      <Stat label="Native unbonding" value="21–28 h" hint="4 epochs of ~6.9 h" />
+      <Stat label="Native unbonding" value="21–28 h" hint="4 epoch boundaries, ~7 h each" />
     </div>
   );
 }

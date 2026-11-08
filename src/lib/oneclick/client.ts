@@ -38,6 +38,8 @@ export interface QuoteMode {
   /** The app-wide dry-run switch. */
   dryRun: boolean;
   direction: "inbound" | "outbound";
+  /** Checks a live quote's deposit address is an address of the origin chain (inbound). */
+  depositAddressValid?: (address: string) => boolean;
   fetchImpl?: Fetch;
   signal?: AbortSignal;
 }
@@ -58,7 +60,7 @@ export async function requestQuote(req: QuoteRequest, mode: QuoteMode): Promise<
   });
   const body = (await res.json().catch(() => ({}))) as QuoteResponse & { message?: string };
   if (!res.ok) throw new OneClickError(friendlyQuoteError(body.message ?? "", res.status), res.status);
-  const echo = verifyQuoteEcho(req, body);
+  const echo = verifyQuoteEcho(req, body, mode.depositAddressValid ? { depositAddressValid: mode.depositAddressValid } : {});
   if (!echo.ok) throw new QuoteEchoError(echo.mismatches);
   return body;
 }

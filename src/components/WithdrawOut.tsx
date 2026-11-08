@@ -3,14 +3,14 @@
 import { useEffect, useState } from "react";
 import { DESTINATION_ASSETS, PINNED_CHAINS, findAsset, looksLikeAddress, type SourceAsset } from "@/lib/assets";
 import { addRecord, newId, updateFlow } from "@/lib/history";
-import { nearBalance } from "@/lib/near/reads";
+import { nearClient, nearSpendable } from "@/lib/near/reads";
 import { getStatus, requestQuote, submitDepositTx } from "@/lib/oneclick/client";
-import { buildOutboundQuoteRequest, quoteDeadline } from "@/lib/oneclick/quote";
-import { isTerminal, phaseOf } from "@/lib/oneclick/status";
+import { buildOutboundQuoteRequest, payCutoffMs, quoteDeadline } from "@/lib/oneclick/quote";
+import { isFinal, phaseOf } from "@/lib/oneclick/status";
 import type { QuoteResponse, StatusResponse } from "@/lib/oneclick/types";
 import { connectPayer, PAYER_LABEL } from "@/lib/pay";
 import { clock, formatNear, formatUnits, parseUnits, shortAccount } from "@/lib/format";
-import { DEFAULT_RESERVE } from "@/lib/staking";
+import { DEFAULT_RESERVE, upfrontGas } from "@/lib/staking";
 import { useAsync, useNow } from "@/lib/useAsync";
 import { useApp } from "./AppProvider";
 import { PayWithSheet } from "./PayWithSheet";
@@ -36,18 +36,33 @@ export function outboundDepositTx(account: string, depositAddress: string, amoun
   };
 }
 
+/** A 1Click deposit address on NEAR (64 hex) for sizing the transaction before a quote exists. */
+const PROBE_ADDRESS = "0".repeat(64);
+
+/**
+ * What can leave: spendable − the wNEAR transaction's upfront gas (120 Tgas bought at
+ * min_gas_purchase_price, refunded after) − two registrations − the reserve kept for later gas.
+ */
+async function sendable(account: string): Promise<bigint> {
+  const rpc = nearClient().rpc;
+  const [free, upfront] = await Promise.all([nearSpendable(account, rpc), upfrontGas(rpc, [outboundDepositTx(account, PROBE_ADDRESS, 1n)])]);
+  const max = free - upfront - 2n * STORAGE - DEFAULT_RESERVE - 1n;
+  return max > 0n ? max : 0n;
+}
+
 /** "Withdraw to any chain": NEAR on the account → 1Click → a token on another chain, to the user's own address. */
 export function WithdrawOut() {
   const { near, dryRun } = useApp();
   const account = near!.accountId;
-  const bal = useAsync(() => nearBalance(account), [account], 30_000);
-  const spendable = bal.data !== undefined ? bal.data - DEFAULT_RESERVE - 3n * STORAGE - 10n ** 22n : 0n;
+  const bal = useAsync(() => sendable(account), [account], 30_000);
+  const spendable = bal.data ?? 0n;
   const [dest, setDest] = useState<SourceAsset | null>(() => findAsset("eip155:8453", "USDC") ?? null);
   const [sheet, setSheet] = useState(false);
   const [text, setText] = useState("");
   const [recipient, setRecipient] = useState("");
   const [own, setOwn] = useState(false);
-  const [quote, setQuote] = useState<{ res: QuoteResponse; flowId: string } | null>(null);
+  // the quote keeps the token it was made for: what is shown and signed is the quote, never the edited inputs
+  const [quote, setQuote] = useState<{ res: QuoteResponse; flowId: string; dest: SourceAsset } | null>(null);
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [hash, setHash] = useState("");
   const [err, setErr] = useState("");
@@ -57,16 +72,27 @@ export function WithdrawOut() {
 
   const deadline = quote ? quoteDeadline(quote.res) : null;
   const phase = phaseOf(status, { deadlineMs: deadline, now });
+  const cutoff = payCutoffMs("near:mainnet");
+  const sent = !!hash;
 
+  // any edit makes the quote stale: drop it (after sending, the inputs are locked instead)
+  const edit = <T,>(set: (v: T) => void) => (v: T) => {
+    if (sent) return;
+    set(v);
+    setQuote(null);
+    setStatus(null);
+  };
+
+  // until 1Click gives a final answer; once a minute past the deadline, in case it saw the deposit late
   useEffect(() => {
-    if (!quote || quote.res.quoteRequest.dry || !hash || isTerminal(phase)) return;
+    if (!quote || quote.res.quoteRequest.dry || !hash || isFinal(phase)) return;
     const t = setInterval(async () => {
       const s = await getStatus(quote.res.quote.depositAddress!).catch(() => null);
       if (s) {
         setStatus(s);
         updateFlow(quote.flowId, { status: s.status });
       }
-    }, 5000);
+    }, phase === "expired" ? 60_000 : 5000);
     return () => clearInterval(t);
   }, [quote, hash, phase]);
 
@@ -74,7 +100,7 @@ export function WithdrawOut() {
     if (!dest?.family) return;
     try {
       const p = await connectPayer(dest.family);
-      setRecipient(p.address);
+      edit(setRecipient)(p.address);
       setOwn(true);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -88,13 +114,14 @@ export function WithdrawOut() {
     setStatus(null);
     if (!dest) return;
     if (amount === null || amount <= 0n) return setErr("Enter an amount of NEAR.");
-    if (amount > spendable) return setErr(`At most ${formatNear(spendable > 0n ? spendable : 0n)} can leave (0.02 NEAR stays for gas, plus wNEAR registration).`);
+    if (amount > spendable) return setErr(`At most ${formatNear(spendable)} can leave: NEAR holds back about 0.12 NEAR of prepaid gas while the transaction runs (refunded), plus the wNEAR registrations and 0.02 NEAR for later gas.`);
     if (!looksLikeAddress(dest.chain, recipient)) return setErr(`Enter your own ${dest.chainLabel} address.`);
     if (!own) return setErr("Confirm the address is your own wallet.");
     setBusy(true);
     try {
       const req = buildOutboundQuoteRequest({ destinationAsset: dest.assetId, amount, recipient: recipient.trim(), refundTo: account, dry: dryRun });
       const res = await requestQuote(req, { dryRun, direction: "outbound" });
+      const quoted = dest;
       const flowId = newId();
       addRecord({
         id: flowId,
@@ -112,7 +139,7 @@ export function WithdrawOut() {
         staked: null,
         txs: [],
       });
-      setQuote({ res, flowId });
+      setQuote({ res, flowId, dest: quoted });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -121,7 +148,7 @@ export function WithdrawOut() {
   };
 
   const send = async () => {
-    if (!quote || quote.res.quoteRequest.dry || !quote.res.quote.depositAddress || amount === null) return;
+    if (!quote || quote.res.quoteRequest.dry || !quote.res.quote.depositAddress || busy || sent) return;
     setBusy(true);
     setErr("");
     try {
@@ -146,11 +173,11 @@ export function WithdrawOut() {
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1.5">
           <span className="text-sm text-muted">NEAR to send · {bal.data !== undefined ? `${formatNear(spendable > 0n ? spendable : 0n, 3)} available` : "…"}</span>
-          <input value={text} onChange={(e) => setText(e.target.value)} inputMode="decimal" placeholder="0.0" className="rounded-xl border border-line bg-surface-2 px-3 py-2.5 outline-none focus:border-accent" />
+          <input value={text} onChange={(e) => edit(setText)(e.target.value)} disabled={sent} inputMode="decimal" placeholder="0.0" className="rounded-xl border border-line bg-surface-2 px-3 py-2.5 outline-none focus:border-accent" />
         </label>
         <div className="flex flex-col gap-1.5">
           <span className="text-sm text-muted">Receive</span>
-          <button type="button" onClick={() => setSheet(true)} className="btn-tactile justify-between px-3 py-2.5 text-left">
+          <button type="button" onClick={() => setSheet(true)} disabled={sent} className="btn-tactile justify-between px-3 py-2.5 text-left">
             <span className="flex items-center gap-2">
               {dest && <Icon src={dest.icon} alt="" size={22} />}
               {dest ? `${dest.symbol} on ${dest.chainLabel}` : "Pick a token"}
@@ -161,7 +188,7 @@ export function WithdrawOut() {
       </div>
       <label className="flex flex-col gap-1.5">
         <span className="text-sm text-muted">Your address on {dest?.chainLabel}</span>
-        <input value={recipient} onChange={(e) => setRecipient(e.target.value)} spellCheck={false} className="rounded-xl border border-line bg-surface-2 px-3 py-2.5 font-mono text-sm outline-none focus:border-accent" />
+        <input value={recipient} onChange={(e) => edit(setRecipient)(e.target.value)} disabled={sent} spellCheck={false} className="rounded-xl border border-line bg-surface-2 px-3 py-2.5 font-mono text-sm outline-none focus:border-accent" />
       </label>
       <div className="flex flex-wrap items-center gap-3">
         {dest?.family && (
@@ -170,21 +197,21 @@ export function WithdrawOut() {
           </button>
         )}
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={own} onChange={(e) => setOwn(e.target.checked)} className="accent-[var(--accent)]" />
+          <input type="checkbox" checked={own} onChange={(e) => edit(setOwn)(e.target.checked)} disabled={sent} className="accent-[var(--accent)]" />
           This is my own wallet (not an exchange)
         </label>
       </div>
       {err && <Banner tone="danger">{err}</Banner>}
-      <button type="button" onClick={() => void getQuote()} disabled={busy} className="btn-tactile-accent justify-center px-4 py-3">
+      <button type="button" onClick={() => void getQuote()} disabled={busy || sent} className="btn-tactile-accent justify-center px-4 py-3">
         {busy && !quote ? "Getting a quote…" : dryRun ? "Get a dry-run quote" : "Get quote"}
       </button>
-      {quote && dest && (
+      {quote && (
         <Rows>
           <Row label="You send">{formatNear(BigInt(quote.res.quote.amountIn))}</Row>
           <Row label="You receive">
-            ≈ {formatUnits(BigInt(quote.res.quote.amountOut), dest.decimals)} {dest.symbol}
+            ≈ {formatUnits(BigInt(quote.res.quote.amountOut), quote.dest.decimals)} {quote.dest.symbol} on {quote.dest.chainLabel}
             <span className="block text-xs text-muted">
-              at least {formatUnits(BigInt(quote.res.quote.minAmountOut), dest.decimals)} · to {shortAccount(recipient)}
+              at least {formatUnits(BigInt(quote.res.quote.minAmountOut), quote.dest.decimals)} · to {quote.res.quoteRequest.recipient}
             </span>
           </Row>
           <Row label="Quote check">
@@ -198,15 +225,22 @@ export function WithdrawOut() {
       {live && !hash && (
         <>
           <TxPreview transactions={[outboundDepositTx(account, live.quote.depositAddress!, BigInt(live.quote.amountIn))]} />
-          <button type="button" onClick={() => void send()} disabled={busy || (deadline !== null && deadline < now)} className="btn-tactile-accent justify-center px-4 py-3">
-            {busy ? "Confirm in your wallet…" : "Sign and send NEAR"}
+          <button type="button" onClick={() => void send()} disabled={busy || (deadline !== null && deadline - now <= cutoff)} className="btn-tactile-accent justify-center px-4 py-3">
+            {busy ? "Confirm in your wallet…" : deadline !== null && deadline - now <= cutoff ? "Too close to the deadline: get a new quote" : "Sign and send NEAR"}
           </button>
         </>
       )}
       {hash && (
-        <Banner tone={phase === "delivered" ? "accent" : phase === "refunded" || phase === "failed" ? "danger" : "muted"} title={phase === "delivered" ? "Delivered" : phase === "refunded" ? "Refunded to your NEAR account" : phase === "failed" ? "Failed: refund to your NEAR account" : "On its way"}>
+        <Banner
+          tone={phase === "delivered" ? "accent" : phase === "refunded" || phase === "failed" || phase === "expired" ? "danger" : "muted"}
+          title={
+            phase === "delivered" ? "Delivered" : phase === "refunded" ? "Refunded to your NEAR account" : phase === "failed" ? "1Click reports the swap failed" : phase === "expired" ? "Deadline passed" : "On its way"
+          }
+        >
           NEAR deposit <TxLink chain="near:mainnet" hash={hash} />
           {status?.status ? ` · 1Click: ${status.status}` : ""}
+          {phase === "expired" && <span className="block text-sm">1Click hasn&apos;t taken the deposit in time: it refunds to {shortAccount(account)}. This keeps checking once a minute.</span>}
+          {phase === "failed" && <span className="block text-sm">Check {shortAccount(account)} for the refund; if nothing arrives, contact 1Click support with the deposit address (the signed quote is in History).</span>}
         </Banner>
       )}
       {sheet && (
@@ -219,7 +253,7 @@ export function WithdrawOut() {
           balances={new Map()}
           hint="1Click delivers the token to your address on that chain."
           onPick={(t) => {
-            setDest(t as SourceAsset);
+            edit(setDest)(t as SourceAsset);
             setRecipient("");
             setOwn(false);
             setSheet(false);

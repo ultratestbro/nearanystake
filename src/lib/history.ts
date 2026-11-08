@@ -30,6 +30,10 @@ export interface FlowRecord {
   status: OneClickStatus | null;
   /** NEAR the stake step staked, yocto string. */
   staked: string | null;
+  /** When the app sent the deposit from a connected wallet: the Pay button never comes back after it. */
+  paidAt?: number | null;
+  /** A stake was signed but its result is unknown (the wallet errored or closed): retrying needs a position check first. */
+  stakeAttemptAt?: number | null;
   txs: TxRef[];
 }
 
@@ -77,9 +81,23 @@ export function loadHistory(kv: KeyValue | null = store()): HistoryRecord[] {
   }
 }
 
+/**
+ * The newest MAX records. Over the cap, dry quotes go first (oldest first): a live quote's signed
+ * response is kept for disputes as long as there is room.
+ */
+export function trimHistory(all: HistoryRecord[], max = MAX): HistoryRecord[] {
+  if (all.length <= max) return all;
+  const out = [...all];
+  for (let i = out.length - 1; i >= 0 && out.length > max; i--) {
+    const r = out[i]!;
+    if (r.type === "flow" && r.dry) out.splice(i, 1);
+  }
+  return out.slice(0, max);
+}
+
 function save(all: HistoryRecord[], kv: KeyValue | null) {
   try {
-    kv?.setItem(KEY, JSON.stringify(all.slice(0, MAX)));
+    kv?.setItem(KEY, JSON.stringify(trimHistory(all)));
   } catch {
     // storage full or blocked: the flow still works, it just won't be listed later
   }

@@ -111,7 +111,9 @@ export async function connectTonPayer(): Promise<Payer> {
           ...(comment ? { payload: comment.toBoc().toString("base64") } : {}),
         };
       }
-      const r = await c.sendTransaction({ validUntil: Math.floor(Date.now() / 1000) + 600, messages: [message] });
+      // never valid past the quote's deadline: a message landing after it would be refunded
+      const validUntil = Math.floor(Math.min(p.validUntilMs, Date.now() + 600_000) / 1000);
+      const r = await c.sendTransaction({ validUntil, messages: [message] });
       // hash of the signed external message; 1Click and explorers resolve it to the transaction
       return Cell.fromBase64(r.boc).hash().toString("hex");
     },

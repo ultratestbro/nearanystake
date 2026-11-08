@@ -81,6 +81,26 @@ export async function nearSignIn({ silent = false } = {}): Promise<NearSession> 
   return { wallet, accountId, name: meta?.name ?? "NEAR wallet", icon: meta?.iconUrl ?? "" };
 }
 
+/**
+ * Calls `onChange` whenever the wallet's active account changes (a switch inside the wallet, a sign-out
+ * in another tab), so the app never keeps signing for, or delivering to, an account the user left.
+ */
+export async function watchActiveAccount(onChange: (accountId: string | null) => void): Promise<() => void> {
+  const s = await getSelector();
+  const active = () => {
+    const st = s.store.getState();
+    return st.selectedWalletId ? (st.accounts.find((a) => a.active)?.accountId ?? null) : null;
+  };
+  let last = active();
+  const sub = s.store.observable.subscribe(() => {
+    const now = active();
+    if (now === last) return;
+    last = now;
+    onChange(now);
+  });
+  return () => sub.unsubscribe();
+}
+
 export async function nearSignOut(): Promise<void> {
   await getSelector()
     .then((s) => s.wallet())

@@ -5,14 +5,41 @@
 
 import type { IWalletAccount, IWalletAccountReadOnly } from "@anywalletkit/core";
 import {
-  DEFAULT_RESERVE, MIN_STAKE, NativeStakingProtocolNear, NearStakingError, NUM_EPOCHS_TO_UNLOCK, UNSTAKED_DUST,
+  DEFAULT_RESERVE, GasPricer, MIN_STAKE, NativeStakingProtocolNear, NearStakingError, NUM_EPOCHS_TO_UNLOCK, UNSTAKED_DUST, costOf,
   type NativeStakingNearConfig, type NearPoolInfo, type PoolRefusal,
 } from "@anywalletkit/protocol-staking-native-near";
+import type { NearRpc, NearTransaction } from "@anywalletkit/wallet-near";
 import { LiquidStakingError, LiquidStakingProtocolNear, LIQUID_PRESETS, type LiquidPresetName } from "@anywalletkit/protocol-staking-liquid-near";
 import { createNearHistory } from "@anywalletkit/wallet-near/history";
 import { ARCHIVAL_RPC, nearProviders } from "./near/config";
 
 export { DEFAULT_RESERVE, MIN_STAKE, NUM_EPOCHS_TO_UNLOCK, UNSTAKED_DUST, NearStakingError, LiquidStakingError };
+
+let pricer: { rpc: NearRpc; p: GasPricer } | null = null;
+/**
+ * The NEAR the node holds back when it accepts `txs` (prepaid gas bought at min_gas_purchase_price,
+ * 10× the gas price on mainnet), by the modules' own fee model. For the app's own transactions (the
+ * wNEAR deposit of "Withdraw to any chain").
+ */
+export async function upfrontGas(rpc: NearRpc, txs: NearTransaction[]): Promise<bigint> {
+  if (pricer?.rpc !== rpc) pricer = { rpc, p: new GasPricer(() => rpc) };
+  return costOf(txs, await pricer.p.prices()).upfront;
+}
+
+/**
+ * What a stake keeps back on a fresh account by the module's own rules: the stake's upfront gas plus
+ * the reserve (at least one unstake's upfront gas). For the dry-run simulation, where the delivery
+ * never reached an account the module could quote.
+ */
+export async function stakeOverhead(module: { gas: { stake: bigint; unstake: bigint; withdraw: bigint } }, rpc: NearRpc): Promise<bigint> {
+  const fc = (methodName: string, args: Record<string, unknown>, gas: bigint) => ({ functionCall: { methodName, args, gas, deposit: 0n } });
+  const exitGas = module.gas.unstake > module.gas.withdraw ? module.gas.unstake : module.gas.withdraw;
+  const [stake, exit] = await Promise.all([
+    upfrontGas(rpc, [{ receiverId: "pool", actions: [fc("deposit_and_stake", {}, module.gas.stake)] }]),
+    upfrontGas(rpc, [{ receiverId: "pool", actions: [fc("unstake", { amount: "9".repeat(39) }, exitGas)] }]),
+  ]);
+  return stake + (exit > DEFAULT_RESERVE ? exit : DEFAULT_RESERVE);
+}
 export type {
   NearEpoch, NearPoolInfo, NearPoolPosition, NearStakeQuote, NearUnstakeQuote, NearClaimQuote, NearWithdrawalRequest, PoolRefusal, UnlockEstimate,
   NearStakingWarning, NearNetworkStats,
@@ -97,8 +124,9 @@ export function stakingErrorText(e: unknown): string {
   if (e instanceof LiquidStakingError) return e.message;
   const name = (e as { name?: string })?.name ?? "";
   if (name === "ReadOnlyAccountError") return "This is a read-only demo account: connect your own wallet to sign.";
-  if (name === "InsufficientFundsError") return "Not enough NEAR on the account for this plus gas and the 0.02 NEAR reserve.";
+  const short = "Not enough NEAR on the account: NEAR holds back the prepaid gas when it accepts a transaction (about 0.05 NEAR per call, refunded seconds later), and a stake leaves enough to unstake later.";
+  if (name === "InsufficientFundsError") return short;
   const m = e instanceof Error ? e.message : String(e);
-  if (/insufficient/i.test(m)) return "Not enough NEAR on the account for this plus gas and the 0.02 NEAR reserve.";
+  if (/insufficient|NotEnoughBalance/i.test(m)) return short;
   return m;
 }

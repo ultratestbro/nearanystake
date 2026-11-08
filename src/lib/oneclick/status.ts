@@ -4,18 +4,22 @@
 import type { OneClickStatus, StatusResponse } from "./types";
 
 export type Phase =
+  | "unknown"            // no fresh answer yet for a reopened flow, or a status this app does not know: never payable
   | "awaiting-deposit"   // PENDING_DEPOSIT before the deadline
   | "deposit-detected"   // KNOWN_DEPOSIT_TX: the tx is seen, waiting for confirmations
   | "incomplete-deposit" // INCOMPLETE_DEPOSIT: less than quoted arrived (often an exchange's fee)
   | "processing"         // PROCESSING: swapping and delivering
   | "delivered"          // SUCCESS: native NEAR (or stNEAR) is on the NEAR account
   | "refunded"           // REFUNDED
-  | "failed"             // FAILED: 1Click refunds
+  | "failed"             // FAILED: "the swap encountered an error" (1Click says no more)
   | "expired";           // the deadline passed with no (or not enough) deposit: anything sent is refunded
 
 export const TERMINAL_PHASES: ReadonlySet<Phase> = new Set(["delivered", "refunded", "failed", "expired"]);
 
 export const isTerminal = (p: Phase) => TERMINAL_PHASES.has(p);
+
+/** 1Click's own final answers: polling stops. "expired" is only our clock, so a late deposit is still tracked (slowly). */
+export const isFinal = (p: Phase) => p === "delivered" || p === "refunded" || p === "failed";
 
 const BY_STATUS: Record<OneClickStatus, Phase> = {
   PENDING_DEPOSIT: "awaiting-deposit",
@@ -29,12 +33,15 @@ const BY_STATUS: Record<OneClickStatus, Phase> = {
 
 /**
  * The phase of a swap. `status` null means 1Click does not know the deposit address yet (it
- * answers 404 for a moment after the quote). Past the deadline, a swap still waiting for (enough)
- * deposit is expired: the address goes cold and late deposits are refunded.
+ * answers 404 for a moment after the quote); for a flow reopened from History (`resumed`) it means
+ * no fresh answer yet, and nothing is shown as payable until one comes. A status this app does not
+ * know is "unknown" too. Past the deadline, a swap still waiting for (enough) deposit is expired:
+ * late deposits are refunded.
  */
-export function phaseOf(status: StatusResponse | null, ctx: { deadlineMs: number | null; now: number }): Phase {
-  const p = status ? BY_STATUS[status.status] : "awaiting-deposit";
-  if (!p) return "awaiting-deposit";
+export function phaseOf(status: StatusResponse | null, ctx: { deadlineMs: number | null; now: number; resumed?: boolean }): Phase {
+  if (!status && ctx.resumed) return "unknown";
+  const p: Phase | undefined = status ? BY_STATUS[status.status] : "awaiting-deposit";
+  if (!p) return "unknown";
   const late = ctx.deadlineMs !== null && ctx.now > ctx.deadlineMs;
   if (late && (p === "awaiting-deposit" || p === "incomplete-deposit")) return "expired";
   return p;
@@ -82,14 +89,14 @@ export function fundsView(phase: Phase, c: FundsContext): FundsView {
     {
       id: "source",
       label: `${c.source}`,
-      hint: phase === "awaiting-deposit" ? (c.dry ? "dry run: nothing to send" : "waiting for your deposit") : phase === "refunded" ? "refunded here" : "sent",
-      state: phase === "awaiting-deposit" ? "active" : phase === "expired" ? "failed" : phase === "refunded" ? "done" : "done",
+      hint: phase === "unknown" ? "checking with 1Click" : phase === "awaiting-deposit" ? (c.dry ? "dry run: nothing to send" : "waiting for your deposit") : phase === "refunded" ? "refunded here" : "sent",
+      state: phase === "unknown" ? "waiting" : phase === "awaiting-deposit" ? "active" : phase === "expired" ? "failed" : phase === "refunded" ? "done" : "done",
     },
     {
       id: "intents",
       label: "NEAR Intents",
       hint:
-        phase === "deposit-detected" ? "deposit seen, confirming" : phase === "incomplete-deposit" ? "less than quoted arrived" : phase === "processing" ? "swapping into NEAR" : phase === "failed" ? "failed: refund under way" : "",
+        phase === "deposit-detected" ? "deposit seen, confirming" : phase === "incomplete-deposit" ? "less than quoted arrived" : phase === "processing" ? "swapping into NEAR" : phase === "failed" ? "the swap reported an error" : "",
       state: refunding ? (deposited || phase === "expired" ? "failed" : "todo") : delivered ? "done" : phase === "incomplete-deposit" ? "waiting" : atIntents || phase === "deposit-detected" ? "active" : "todo",
     },
     {
@@ -104,6 +111,10 @@ export function fundsView(phase: Phase, c: FundsContext): FundsView {
   let headline: string;
   let tone: FundsView["tone"] = "neutral";
   switch (phase) {
+    case "unknown":
+      headline = "Checking this swap with 1Click. Don't pay again: the deposit panel comes back only if 1Click says it is still waiting for a deposit.";
+      tone = "warn";
+      break;
     case "awaiting-deposit":
       headline = c.dry ? `Dry run: your funds would still be in your wallet (${c.source}).` : `Your funds are still in your wallet. Send the deposit to start.`;
       break;
@@ -111,7 +122,7 @@ export function fundsView(phase: Phase, c: FundsContext): FundsView {
       headline = `Your deposit is on ${c.source.split(" on ").pop()}, waiting for confirmations before NEAR Intents takes it.`;
       break;
     case "incomplete-deposit":
-      headline = "Less than the quoted amount arrived (an exchange may have taken its fee). Top up the difference before the deadline, or it is refunded.";
+      headline = "Less than the quoted amount arrived (an exchange may have taken its fee). Unless the rest arrives before the deadline, it is refunded (minus the refund fee).";
       tone = "warn";
       break;
     case "processing":
@@ -130,11 +141,11 @@ export function fundsView(phase: Phase, c: FundsContext): FundsView {
       tone = "bad";
       break;
     case "failed":
-      headline = "The swap failed. 1Click refunds the deposit to your refund address.";
+      headline = "1Click reports that the swap failed. Check your refund address on the source chain; if nothing arrives, contact 1Click support with the deposit address (the signed quote is in History).";
       tone = "bad";
       break;
     case "expired":
-      headline = "The quote expired before a full deposit arrived. Anything sent to the address is refunded.";
+      headline = "The deadline passed before a full deposit arrived: anything sent is refunded (minus the refund fee). This page keeps checking in case 1Click saw a deposit late.";
       tone = "bad";
       break;
   }

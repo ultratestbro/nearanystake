@@ -15,8 +15,10 @@ export interface StakeAmountInput {
 
 export interface StakeAmount {
   amount: bigint;
-  /** Which figure the amount came from. */
+  /** Which figure the amount came from (the lower one when both are known). */
   basis: "on-chain" | "reported";
+  /** Both figures are known and differ: the lower one is used. */
+  mismatch: boolean;
   /** True when the spendable balance was lower than the delivery (a fresh account pays gas and storage from it). */
   capped: boolean;
   /** True when what is left is below the module's minimum: nothing to stake. */
@@ -24,14 +26,21 @@ export interface StakeAmount {
 }
 
 export function stakeAmountAfterDelivery(i: StakeAmountInput): StakeAmount {
-  const delivered = i.onChain ?? i.reported;
+  // Neither figure alone can inflate the stake: the on-chain one comes through our RPC proxy and sums
+  // every intents.near transfer in the transaction, the reported one is 1Click's word.
+  const both = i.onChain !== null && i.reported !== null;
+  const onChainLower = i.onChain !== null && (i.reported === null || i.onChain <= i.reported);
+  const delivered = onChainLower ? i.onChain : i.reported;
   if (delivered === null) throw new Error("Nothing delivered yet.");
-  if (delivered <= 0n) return { amount: 0n, basis: i.onChain !== null ? "on-chain" : "reported", capped: false, tooSmall: true };
+  const basis = onChainLower ? "on-chain" : "reported";
+  const mismatch = both && i.onChain !== i.reported;
+  if (delivered <= 0n) return { amount: 0n, basis, mismatch, capped: false, tooSmall: true };
   const spendable = i.maxStakeable > 0n ? i.maxStakeable : 0n;
   const amount = delivered < spendable ? delivered : spendable;
   return {
     amount: amount < i.minStake ? 0n : amount,
-    basis: i.onChain !== null ? "on-chain" : "reported",
+    basis,
+    mismatch,
     capped: amount < delivered,
     tooSmall: amount < i.minStake,
   };

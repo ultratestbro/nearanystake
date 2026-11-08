@@ -9,13 +9,16 @@ describe("stake only what was delivered", () => {
   it("an account that already held 1000 NEAR stakes exactly the 0.73 delivered", () => {
     const delivered = 730n * 10n ** 21n;
     const r = stakeAmountAfterDelivery({ reported: delivered, onChain: null, maxStakeable: 1000n * NEAR + delivered - 2n * 10n ** 22n, minStake: MIN });
-    expect(r).toEqual({ amount: delivered, basis: "reported", capped: false, tooSmall: false });
+    expect(r).toEqual({ amount: delivered, basis: "reported", mismatch: false, capped: false, tooSmall: false });
   });
 
-  it("prefers the amount read from the NEAR delivery transaction", () => {
+  it("uses the lower of the NEAR transaction and 1Click's report: neither can inflate the stake (audit L7)", () => {
     const r = stakeAmountAfterDelivery({ reported: 800n * 10n ** 21n, onChain: 755n * 10n ** 21n, maxStakeable: 10n * NEAR, minStake: MIN });
-    expect(r.amount).toBe(755n * 10n ** 21n);
-    expect(r.basis).toBe("on-chain");
+    expect(r).toMatchObject({ amount: 755n * 10n ** 21n, basis: "on-chain", mismatch: true });
+    // a lying proxy (or a batched transaction summed) reports more on chain than 1Click delivered
+    const inflated = stakeAmountAfterDelivery({ reported: 755n * 10n ** 21n, onChain: 5n * NEAR, maxStakeable: 10n * NEAR, minStake: MIN });
+    expect(inflated).toMatchObject({ amount: 755n * 10n ** 21n, basis: "reported", mismatch: true });
+    expect(stakeAmountAfterDelivery({ reported: NEAR, onChain: NEAR, maxStakeable: 10n * NEAR, minStake: MIN })).toMatchObject({ basis: "on-chain", mismatch: false });
   });
 
   it("a fresh account created by the delivery is capped by what it can spend (reserve + gas + storage)", () => {

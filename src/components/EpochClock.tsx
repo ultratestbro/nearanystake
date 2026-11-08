@@ -7,11 +7,13 @@ import { useAsync, useNow } from "@/lib/useAsync";
 import { useNetworkStaking } from "./hooks";
 import { Progress, Skeleton } from "./ui";
 
-/** Unbonding of an unstake made now: 4 more epoch boundaries, the first being this epoch's end. */
-export function unbondingWindow(e: NearEpoch): { earliest: number; latest: number } {
-  // unstake in epoch N unlocks at the start of N+4: between 3 and 4 full epochs after this one ends
+/**
+ * Unlock of an unstake made now. It unlocks at the start of epoch N + 4: exactly 3 epochs after this
+ * one ends. Only a transaction that lands after this epoch's end unlocks one epoch later (`ifLate`).
+ */
+export function unbondingWindow(e: NearEpoch): { at: number; ifLate: number } {
   const n = bigintToNumber(NUM_EPOCHS_TO_UNLOCK);
-  return { earliest: e.endsAt + (n - 1) * e.epochMs, latest: e.endsAt + n * e.epochMs };
+  return { at: e.endsAt + (n - 1) * e.epochMs, ifLate: e.endsAt + n * e.epochMs };
 }
 
 export function useEpoch() {
@@ -40,8 +42,8 @@ export function EpochClock({ compact = false }: { compact?: boolean }) {
         {!compact && (
           <>
             {" "}
-            Unstake now and native NEAR unlocks at epoch {(e.height + NUM_EPOCHS_TO_UNLOCK).toString()}: between {dateTime(w.earliest)} and {dateTime(w.latest)} (in about{" "}
-            {Math.round((w.earliest - now) / 3_600_000)}–{Math.round((w.latest - now) / 3_600_000)} h).
+            Unstake now and native NEAR unlocks at epoch {(e.height + NUM_EPOCHS_TO_UNLOCK).toString()}, around {dateTime(w.at)} (in about {Math.round((w.at - now) / 3_600_000)} h);
+            one epoch later if the transaction lands after this epoch ends.
           </>
         )}
       </p>

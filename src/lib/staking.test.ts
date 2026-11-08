@@ -44,6 +44,8 @@ function fakeNode(opts: { balance?: bigint; delegation?: Delegation } = {}) {
     requests.push({ method, params });
     const p = params as Record<string, unknown>;
     if (method === "gas_price") return { gas_price: "100000000" };
+    // mainnet since protocol 88: prepaid gas is bought upfront at 10^9 per gas, ten times the gas price
+    if (method === "EXPERIMENTAL_protocol_config") return { protocol_version: 88, runtime_config: { min_gas_purchase_price: "1000000000" } };
     if (method === "block") return header(typeof p.block_id === "number" ? p.block_id : EPOCH_START + 20_000);
     if (method === "validators") {
       return {
@@ -116,14 +118,36 @@ describe("staking on the real modules through the wallet-selector adapter", () =
     expect((q.transactions[0]!.actions[0] as { functionCall: { deposit: bigint } }).functionCall.deposit).toBe(delivered);
   });
 
-  it("a fresh account is capped by what it can spend: delivery − 0.02 NEAR reserve − the fee bound", async () => {
+  it("a fresh account is capped by what it can spend: delivery − the gas NEAR holds back upfront − what pays for the unstake", async () => {
     const { native } = setup({ balance: NEAR });
     const max = await native.getMaxStakeable();
-    const { fee } = await native.quoteStake({ amount: MIN_STAKE, pool: ASTRO });
-    // the fee bound is the prepaid 50 Tgas (0.005 NEAR at 10^8 yocto per gas) plus the action base fees
-    expect(fee).toBeGreaterThan(5n * 10n ** 21n);
-    expect(max).toBe(NEAR - 182n * 10n ** 19n - 2n * 10n ** 22n - fee);
+    const { fee, upfront, reserve } = await native.quoteStake({ amount: MIN_STAKE, pool: ASTRO });
+    // 50 Tgas bought at 10^9 is 0.05 NEAR held back while it runs; the fee is what it finally costs at most
+    expect(upfront).toBeGreaterThan(5n * 10n ** 22n);
+    expect(fee).toBeLessThan(upfront / 5n);
+    // what stays pays for the later unstake (another 50 Tgas upfront)
+    expect(reserve).toBeGreaterThan(5n * 10n ** 22n);
+    expect(max).toBe(NEAR - 182n * 10n ** 19n - reserve - upfront);
+    // the node's own check on accepting the stake of `max`: deposit + prepaid gas at 10^9 fits the balance
+    expect(max + 54n * TGAS * 10n ** 9n).toBeLessThanOrEqual(NEAR - 182n * 10n ** 19n);
     expect(stakeAmountAfterDelivery({ reported: NEAR, onChain: NEAR, maxStakeable: max, minStake: MIN_STAKE })).toMatchObject({ amount: max, capped: true });
+  });
+
+  it("a wallet that errors after broadcasting is not a cancel: only an explicit user rejection is", async () => {
+    const { mapError } = await import("./near/selector-account");
+    expect(mapError(new Error("User rejected the request")).name).toBe("UserRejectedError");
+    expect(mapError(Object.assign(new Error("whatever"), { code: 4001 })).name).toBe("UserRejectedError");
+    for (const m of ["Popup closed", "Window closed", "user", "Cancelled: insufficient balance", "Failed to fetch"]) expect(mapError(new Error(m)).name).not.toBe("UserRejectedError");
+  });
+
+  it("an unstake next to a balance still unbonding needs the user's explicit allowTimerReset", async () => {
+    const { native, w } = setup({ delegation: { staked: 3n * NEAR, unstaked: 2n * NEAR, canWithdraw: false } });
+    const err = await native.quoteRequestWithdrawal({ amount: NEAR, pool: ASTRO }).catch((e: unknown) => e);
+    expect((err as NearStakingError).code).toBe("timer-reset-refused");
+    expect(stakingErrorText(err)).toMatch(/restarts its 4-epoch wait/);
+    const q = await native.quoteRequestWithdrawal({ amount: NEAR, pool: ASTRO, allowTimerReset: true });
+    expect(q.resetsTimer).toBe(true);
+    expect(w.signAndSendTransaction).not.toHaveBeenCalled();
   });
 
   it("a plan that changed since the user saw it is refused before the wallet opens", async () => {
@@ -162,8 +186,8 @@ describe("staking on the real modules through the wallet-selector adapter", () =
     const account = selectorAccount(w, ME, { rpc: new NearRpc(node.fetch), network: "mainnet", functionCall });
     const liquid = new LiquidStakingProtocolNear(account, { pool: "linear", provider: node.fetch, apr: () => 4.6 });
     const q = await liquid.quoteStake({ amount: NEAR });
-    expect(q.transactions).toEqual([{ receiverId: LINEAR, actions: [{ functionCall: { methodName: "deposit_and_stake", args: {}, gas: 100n * TGAS, deposit: NEAR } }] }]);
-    expect(q.storageDeposit).toBe(0n);
+    expect(q.transactions).toEqual([{ receiverId: LINEAR, actions: [{ functionCall: { methodName: "deposit_and_stake", args: {}, gas: 30n * TGAS, deposit: NEAR } }] }]);
+    expect(q).not.toHaveProperty("storageDeposit"); // deposit_and_stake registers the account itself
     await liquid.stake({ amount: NEAR, expected: q.transactions });
     const sent = JSON.stringify(w.signAndSendTransaction.mock.calls[0]![0], (_k, v: unknown) => (typeof v === "bigint" ? v.toString() : v));
     expect(sent).not.toMatch(/ft_transfer/);

@@ -82,6 +82,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
       .finally(() => setRestoring(false));
   }, [open]);
 
+  // follow account switches and sign-outs done in the wallet itself
+  const nearId = near?.accountId ?? null;
+  useEffect(() => {
+    if (!nearId) return;
+    let off: (() => void) | null = null;
+    let live = true;
+    void import("@/lib/near/selector")
+      .then((m) =>
+        m.watchActiveAccount((id) => {
+          if (!id) {
+            setNear(null);
+            setDry(true);
+            return;
+          }
+          open(true).then(
+            (c) => {
+              setNear(c);
+              setDry(initialDryRun(c.accountId, remembered()));
+            },
+            () => {
+              setNear(null);
+              setDry(true);
+            },
+          );
+        }),
+      )
+      .then((unsubscribe) => {
+        if (live) off = unsubscribe;
+        else unsubscribe();
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+      off?.();
+    };
+  }, [nearId, open]);
+
   const connectNear = useCallback(async () => {
     setError("");
     setConnecting(true);

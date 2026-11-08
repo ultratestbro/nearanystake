@@ -26,7 +26,9 @@ describe("dry-run guard", () => {
     expect(canGoLive(null)).toBe(false);
     expect(canGoLive("alice.near")).toBe(true);
     expect(initialDryRun(null, false)).toBe(true);
-    expect(initialDryRun("alice.near", null)).toBe(false);
+    // connecting a wallet does not make quotes payable by itself (audit L15): only the switch does
+    expect(initialDryRun("alice.near", null)).toBe(true);
     expect(initialDryRun("alice.near", true)).toBe(true);
+    expect(initialDryRun("alice.near", false)).toBe(false);
   });
 });
