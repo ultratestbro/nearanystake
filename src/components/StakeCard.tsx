@@ -1,8 +1,9 @@
 "use client";
 
-// Presentational pieces of the Stake card (direction A, "swap card"): one centred card that reads
-// You pay → You stake into → You get → Details → one primary action, and turns into the tracker
-// once money moves. No state here: StakeFlow owns it and passes data in.
+// Presentational pieces of the Stake card (direction A, "swap card"): one card that reads
+// You pay → You stake into → You get → Details → one primary action (side by side from lg: the
+// inputs left, the result and the action right), and turns into the tracker once money moves.
+// No state here: StakeFlow owns it and passes data in.
 
 import { useRef, type ReactNode } from "react";
 import { SOURCE_ASSETS } from "@/lib/assets";
@@ -31,27 +32,51 @@ export function nearAmount(yocto: bigint): string {
 
 export function StakeIntro() {
   return (
-    <div className="mx-auto mb-6 max-w-[720px] text-center sm:mb-8">
-      <h1 className="text-[28px] font-semibold leading-tight tracking-[-0.02em] sm:text-4xl sm:leading-[44px]">Stake NEAR with what you already hold</h1>
-      <p className="mt-2 text-base text-muted">Pay from any of {SOURCE_CHAIN_COUNT} chains. NEAR lands in your own account, then one signature stakes it.</p>
+    <div className="mx-auto mb-4 max-w-[720px] text-center sm:mb-6">
+      <h1 className="text-[26px] font-semibold leading-8 tracking-[-0.02em] text-balance sm:text-[32px] sm:leading-10">Stake NEAR with what you already hold</h1>
+      <p className="mt-1 text-[15px] leading-6 text-pretty text-muted">Pay from any of {SOURCE_CHAIN_COUNT} chains. NEAR lands in your own account, then one signature stakes it.</p>
     </div>
   );
 }
 
-/** What the server sends before the flow (which reads the URL) renders in the browser. */
+/** The stake form's card: one column on phones and tablets, two from lg (inputs left, result and action right). */
+const FORM_CARD = "mx-auto w-full max-w-[520px] rounded-3xl border border-line bg-panel p-4 sm:p-5 lg:max-w-[1040px] lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-x-6";
+
+/** What the server sends before the flow (which reads the URL) renders in the browser: the form's two columns. */
 export function StakeFallback() {
   return (
     <>
       <StakeIntro />
-      <div aria-busy="true" className="mx-auto flex max-w-[520px] flex-col gap-2 rounded-3xl border border-line bg-panel p-4 sm:p-6">
-        <Skeleton className="h-7 w-32" />
-        <Skeleton className="mt-2 h-32 w-full rounded-2xl" />
-        <Skeleton className="h-48 w-full rounded-2xl" />
-        <Skeleton className="h-36 w-full rounded-2xl" />
-        <Skeleton className="mt-2 h-14 w-full rounded-[14px]" />
+      <div aria-busy="true" className={`${FORM_CARD} lg:grid`}>
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-36 w-full rounded-2xl" />
+          <Skeleton className="h-52 w-full rounded-2xl" />
+        </div>
+        <div className="mt-2 flex flex-col gap-3 lg:mt-0">
+          <Skeleton className="h-32 w-full rounded-2xl" />
+          <Skeleton className="h-12 w-full rounded-2xl" />
+          <Skeleton className="h-14 w-full rounded-[14px]" />
+        </div>
         <span className="sr-only">Loading the stake form…</span>
       </div>
     </>
+  );
+}
+
+/**
+ * The setup and quote card: `inputs` (You pay → You stake into) and `result` (You get, Details, the
+ * action). From lg the result column sits beside the inputs and stays in view while they grow.
+ * `aside` (other choices) follows the result on phones and sits under the inputs from lg; `footer`
+ * (a way back) closes the card on phones and sits under the result from lg.
+ */
+export function FormCard({ label, inputs, result, aside, footer }: { label: string; inputs: ReactNode; result: ReactNode; aside?: ReactNode; footer?: ReactNode }) {
+  return (
+    <section aria-label={label} className={`${FORM_CARD} lg:grid`}>
+      <div className="min-w-0 lg:col-start-1 lg:row-start-1">{inputs}</div>
+      <div className="mt-2 min-w-0 lg:sticky lg:top-4 lg:col-start-2 lg:row-start-1 lg:mt-0">{result}</div>
+      {aside && <div className="mt-3 min-w-0 lg:col-start-1 lg:row-start-2 lg:mt-4">{aside}</div>}
+      {footer && <div className="mt-1 min-w-0 lg:col-start-2 lg:row-start-2 lg:mt-2">{footer}</div>}
+    </section>
   );
 }
 
@@ -90,13 +115,18 @@ export function CardShell({
   );
 }
 
-/** A dot and a word: "Live quote", "Dry run". */
-export function ModeDot({ live, children }: { live: boolean; children: ReactNode }) {
+/** The one muted line under the action: the mode (dot + word), a few words on what follows, the rest in a hint. */
+export function ModeLine({ live, children, hint, hintLabel = "What happens next" }: { live: boolean; children: ReactNode; hint?: string; hintLabel?: string }) {
   return (
-    <span className="inline-flex min-h-7 items-center gap-2 text-[13px] text-muted">
-      <span aria-hidden className={`size-2 rounded-full ${live ? "bg-accent" : "bg-muted"}`} />
-      {children}
-    </span>
+    <p className="mt-1 flex min-h-6 flex-wrap items-center justify-center gap-x-2 text-center text-[13px] leading-5 text-muted">
+      <span aria-hidden className={`size-2 shrink-0 rounded-full ${live ? "bg-accent" : "bg-muted"}`} />
+      <span className="text-pretty">{children}</span>
+      {hint && (
+        <InfoHint label={hintLabel} className="-ml-1.5">
+          {hint}
+        </InfoHint>
+      )}
+    </p>
   );
 }
 
@@ -178,8 +208,8 @@ export function TargetChoice<T extends string>({
 }
 
 /**
- * The chosen pool or token as one row: avatar, name, a line of numbers, the single trust mark.
- * With `onClick` the whole row opens the picker (the badge stays its own control on top).
+ * The chosen pool or token as one row: avatar, then the name with its single trust mark and a line of
+ * numbers under it. With `onClick` the whole row opens the picker (the badge stays its own control on top).
  */
 export function TargetRow({
   avatar,
@@ -196,29 +226,32 @@ export function TargetRow({
   onClick?: () => void;
   clickLabel?: string;
 }) {
-  // phones: the badge drops under the numbers so the name and figures keep their width
   return (
     <div
-      className={`relative mt-3 grid min-h-16 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 rounded-[14px] border border-line bg-panel p-3 [grid-template-areas:'a_t_c'_'a_m_c'_'a_b_c'] sm:grid-cols-[auto_minmax(0,1fr)_auto_auto] sm:[grid-template-areas:'a_t_b_c'_'a_m_b_c'] ${
+      className={`relative mt-3 flex min-h-16 items-center gap-3 rounded-[14px] border border-line bg-panel px-3 py-2.5 ${
         onClick ? "shadow-[inset_0_-2px_0_rgb(0_0_0/0.35)] transition hover:brightness-110" : ""
       }`}
     >
-      <span className="self-center [grid-area:a]">{avatar}</span>
-      {onClick ? (
-        <button
-          type="button"
-          onClick={onClick}
-          aria-label={clickLabel}
-          className="truncate text-left text-base font-semibold leading-6 [grid-area:t] after:absolute after:inset-0 after:rounded-[14px] after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-2 focus-visible:after:outline-accent"
-        >
-          {title}
-        </button>
-      ) : (
-        <span className="truncate text-base font-semibold leading-6 [grid-area:t]">{title}</span>
-      )}
-      {meta && <span className="text-[13px] leading-5 text-pretty text-muted [grid-area:m]">{meta}</span>}
-      {badge && <span className="relative z-10 mt-1.5 justify-self-start [grid-area:b] sm:mt-0 sm:justify-self-end">{badge}</span>}
-      {onClick && <ChevronDownIcon className="pointer-events-none self-center text-muted [grid-area:c]" />}
+      {avatar}
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+          {onClick ? (
+            <button
+              type="button"
+              onClick={onClick}
+              aria-label={clickLabel}
+              className="min-w-0 truncate text-left text-base font-semibold leading-6 after:absolute after:inset-0 after:rounded-[14px] after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:outline-offset-2 focus-visible:after:outline-accent"
+            >
+              {title}
+            </button>
+          ) : (
+            <span className="min-w-0 truncate text-base font-semibold leading-6">{title}</span>
+          )}
+          {badge && <span className="relative z-10 inline-flex shrink-0">{badge}</span>}
+        </div>
+        {meta && <div className="text-[13px] leading-5 text-pretty text-muted max-sm:text-xs max-sm:leading-[18px]">{meta}</div>}
+      </div>
+      {onClick && <ChevronDownIcon className="pointer-events-none shrink-0 text-muted" />}
     </div>
   );
 }
@@ -274,16 +307,16 @@ export function HowItWorks({ eta }: { eta?: string | null }) {
     },
   ];
   return (
-    <ol aria-label="How it works" className="mx-auto mt-10 grid max-w-[960px] list-none gap-6 p-0 sm:grid-cols-3">
+    <ol aria-label="How it works" className="mx-auto mt-6 grid max-w-[1040px] list-none gap-4 p-0 sm:mt-8 sm:grid-cols-3 sm:gap-6 lg:px-5">
       {steps.map((s, i) => (
         <li key={s.t} className="flex items-start gap-3">
-          <span aria-hidden className="grid size-10 shrink-0 place-items-center rounded-xl border border-line bg-panel text-accent">
+          <span aria-hidden className="grid size-9 shrink-0 place-items-center rounded-xl border border-line bg-panel text-accent">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               {STEP_ICONS[i]}
             </svg>
           </span>
           <span className="flex min-w-0 flex-col">
-            <span className="text-[15px] font-semibold leading-6">{s.t}</span>
+            <span className="text-[15px] font-semibold leading-5">{s.t}</span>
             <span className="text-[13px] leading-5 text-muted">
               {s.d}
               {s.hint && (
