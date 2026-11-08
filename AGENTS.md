@@ -22,6 +22,8 @@ Next 16 App Router, React 19, Tailwind 4, pnpm. `pnpm typecheck && pnpm lint && 
 - Stake only what was delivered (`src/lib/stakeAmount.ts`). Dry-run mode never shows a deposit address and cannot
   send `dry: false` (`src/lib/dryrun.ts`, `client.ts`). It is always on without a NEAR wallet; connecting one turns it
   off unless the user picked dry run before (`initialDryRun`).
+- The Stake card's "You get" / "Kept on your account" numbers come from `src/lib/stakeEstimate.ts` and are display
+  only; the amount signed is still `stakeAmountAfterDelivery`'s. Card pieces live in `StakeCard.tsx` and `PoolAvatar.tsx`.
 - Pages: `/`, `/stake`, `/portfolio` (positions and recent activity; `/positions` and `/history` redirect there in
   `next.config.ts`). Shared UI: `src/components/ui.tsx`, `InfoHint`, `StatusBadge`, `Disclosure`, `icons`.
 - Amounts are bigint; never `Number()` a bigint that can exceed 2^53 (use core's `bigintToNumber`).

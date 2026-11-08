@@ -1,84 +1,183 @@
 "use client";
 
-import type { ReactNode } from "react";
-import type { FundsView, Leg } from "@/lib/oneclick/status";
+// The tracker's two views of one swap: the route strip (source → NEAR Intents → NEAR account → pool,
+// each node with what is there) and the timed step list with done / current / next steps. States
+// come from lib/oneclick/status.ts (fundsView); this file only draws them.
 
-/** "Where your funds are now": the route at a glance, then each leg with its state. */
-export function FundsRoute({ view, icons, extra }: { view: FundsView; icons?: Partial<Record<Leg["id"], ReactNode>>; extra?: Partial<Record<Leg["id"], ReactNode>> }) {
-  const tone = view.tone === "good" ? "text-accent" : view.tone === "bad" ? "text-danger" : view.tone === "warn" ? "text-warn" : "text-text";
+import type { ReactNode } from "react";
+import { explorerTx } from "@/lib/near/config";
+import { shortHash } from "@/lib/format";
+import type { LegState } from "@/lib/oneclick/status";
+import { ArrowUpRightIcon, CheckIcon } from "./icons";
+
+export type StepState = LegState;
+
+export interface RouteNode {
+  id: string;
+  icon: ReactNode;
+  title: ReactNode;
+  caption?: ReactNode;
+  state: StepState;
+  /** Account ids and hashes. */
+  mono?: boolean;
+}
+
+const RING: Record<StepState, string> = {
+  done: "",
+  active: "outline-2 outline-offset-2 outline-dashed outline-warn",
+  waiting: "outline-2 outline-offset-2 outline-dashed outline-warn",
+  failed: "outline-2 outline-offset-2 outline-danger",
+  todo: "opacity-60",
+};
+
+/** Source → NEAR Intents → account → pool, with what each holds. `label` reads the whole route. */
+export function RouteStrip({ nodes, label }: { nodes: RouteNode[]; label: string }) {
   return (
-    <div className="flex flex-col gap-4">
-      <div className="rounded-2xl border border-line bg-bg p-4">
-        <p className="text-xs font-medium uppercase tracking-[0.06em] text-muted">Where your funds are now</p>
-        <p className={`mt-1 font-medium ${tone}`}>{view.headline}</p>
-        <div className="mt-4 flex items-start">
-          {view.legs.map((l, i) => (
-            <div key={l.id} className={`flex min-w-0 items-start ${i < view.legs.length - 1 ? "flex-1" : ""}`}>
-              <Node leg={l} icon={icons?.[l.id]} />
-              {i < view.legs.length - 1 && <Track state={trackState(l, view.legs[i + 1]!)} />}
-            </div>
-          ))}
+    <div role="group" aria-label={label} className="flex items-start gap-1 rounded-2xl bg-surface px-2 py-3 sm:gap-2 sm:p-4">
+      {nodes.map((n, i) => (
+        <div key={n.id} className={`flex min-w-0 items-start gap-1 sm:gap-2 ${i < nodes.length - 1 ? "flex-1" : "shrink-0"}`}>
+          <div className="flex w-[64px] shrink-0 flex-col items-center text-center sm:w-[92px]">
+            <span className={`grid size-8 place-items-center rounded-full ${RING[n.state]}`}>{n.icon}</span>
+            {/* names wrap onto two lines on phones; an account id stays on one line, cut, with the full id on hover */}
+            <span
+              title={n.mono && typeof n.title === "string" ? n.title : undefined}
+              className={`mt-2 w-full text-xs font-semibold leading-4 sm:text-[13px] ${n.mono ? "truncate font-mono text-[11px] sm:text-[13px]" : "line-clamp-2"}`}
+            >
+              {n.title}
+            </span>
+            {n.caption && <span className="w-full text-[11px] leading-4 text-muted sm:text-xs">{n.caption}</span>}
+          </div>
+          {i < nodes.length - 1 && <Track state={nodes[i + 1]!.state} />}
         </div>
-      </div>
-      <ol className="flex flex-col">
-        {view.legs.map((l, i) => (
-          <li key={l.id} className="flex gap-3">
-            <div className="flex flex-col items-center">
-              <StepIcon state={l.state} />
-              {i < view.legs.length - 1 && <span className={`my-1 w-px flex-1 ${l.state === "done" ? "bg-accent/60" : "bg-line"}`} />}
+      ))}
+    </div>
+  );
+}
+
+function Track({ state }: { state: StepState }) {
+  const line =
+    state === "done" ? "border-accent" : state === "active" || state === "waiting" ? "border-dashed border-warn" : state === "failed" ? "border-danger" : "border-line";
+  return (
+    <span aria-hidden className={`relative mt-[15px] h-0 min-w-2 flex-1 border-t-2 ${line}`}>
+      {state === "active" && <span className="travel absolute -top-[5px] size-2 rounded-full bg-accent shadow-[0_0_8px_var(--accent)]" />}
+    </span>
+  );
+}
+
+export interface TrackStep {
+  id: string;
+  state: StepState;
+  /** Omitted when `body` draws its own heading (the stake box). */
+  title?: ReactNode;
+  detail?: ReactNode;
+  /** When it finished, from the start of the swap ("0:21"). */
+  time?: string | null;
+  /** The step's controls (pay, sign) or notices, under the title. */
+  body?: ReactNode;
+  /** The body is a box with its own heading: the rail mark lines up with the box's first line. */
+  boxed?: boolean;
+}
+
+const SR: Record<StepState, string> = { done: "Done: ", active: "In progress: ", waiting: "Your turn: ", failed: "Stopped: ", todo: "Next: " };
+
+/** The steps of a swap on a rail of state marks; the current one is aria-current. */
+export function StepList({ steps }: { steps: TrackStep[] }) {
+  const current = steps.findIndex((s) => s.state === "active" || s.state === "waiting");
+  return (
+    <ol className="flex flex-col">
+      {steps.map((s, i) => {
+        const last = i === steps.length - 1;
+        const next = steps[i + 1];
+        const boxed = s.boxed ?? (!s.title && !!s.body);
+        const line =
+          next?.state === "done" ? "bg-accent" : next?.state === "active" || next?.state === "waiting" ? "bg-warn" : next?.state === "failed" ? "bg-danger/70" : "bg-line";
+        return (
+          <li key={s.id} aria-current={i === current ? "step" : undefined} className="flex gap-3 sm:gap-4">
+            <div aria-hidden className={`flex w-6 shrink-0 flex-col items-center ${boxed ? "pt-4" : ""}`}>
+              <Mark state={s.state} />
+              {!last && <span className={`my-1 w-0.5 flex-1 rounded-full ${line}`} />}
             </div>
-            <div className="flex min-w-0 flex-col pb-4">
-              <span className={l.state === "todo" ? "text-muted" : l.state === "failed" ? "text-danger" : l.state === "active" ? "font-medium" : ""}>{l.label}</span>
-              {l.hint && <span className="text-xs text-muted">{l.hint}</span>}
-              {extra?.[l.id]}
+            <div className={`flex min-w-0 flex-1 flex-col gap-3 ${last ? "" : "pb-6"}`}>
+              {s.title && (
+                <div className="flex items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <p className={`text-[15px] leading-6 ${s.state === "todo" ? "font-medium text-muted" : s.state === "failed" ? "font-semibold text-danger" : "font-semibold"}`}>
+                      <span className="sr-only">{SR[s.state]}</span>
+                      {s.title}
+                    </p>
+                    {s.detail && <div className="text-[13px] leading-5 text-muted [overflow-wrap:anywhere]">{s.detail}</div>}
+                  </div>
+                  {s.time && <span className="shrink-0 font-mono text-xs leading-6 tabular-nums text-muted">{s.time}</span>}
+                </div>
+              )}
+              {s.body}
             </div>
           </li>
-        ))}
-      </ol>
-    </div>
+        );
+      })}
+    </ol>
   );
 }
 
-function trackState(a: Leg, b: Leg): "idle" | "moving" | "done" | "failed" {
-  if (b.state === "failed") return "failed";
-  if (b.state === "done") return "done";
-  if (b.state === "active" || b.state === "waiting" || (a.state === "active" && a.id !== "source")) return "moving";
-  return "idle";
+function Mark({ state }: { state: StepState }) {
+  if (state === "done")
+    return (
+      <span className="grid size-6 place-items-center rounded-full bg-accent text-accent-ink">
+        <CheckIcon size={14} />
+      </span>
+    );
+  if (state === "active" || state === "waiting")
+    return (
+      <span className="grid size-6 place-items-center rounded-full border-2 border-warn">
+        <span className={`size-2 rounded-full bg-warn ${state === "active" ? "motion-safe:animate-pulse" : ""}`} />
+      </span>
+    );
+  if (state === "failed") return <span className="grid size-6 place-items-center rounded-full bg-danger text-xs font-bold text-bg">!</span>;
+  return <span className="size-6 rounded-full border-2 border-line" />;
 }
 
-function Node({ leg, icon }: { leg: Leg; icon?: ReactNode }) {
-  const ring = leg.state === "done" ? "ring-accent" : leg.state === "failed" ? "ring-danger" : leg.state === "active" || leg.state === "waiting" ? "ring-warn" : "ring-line";
+const EXPLORER_NAMES: Record<string, string> = {
+  "basescan.org": "Basescan",
+  "etherscan.io": "Etherscan",
+  "optimistic.etherscan.io": "Etherscan",
+  "arbiscan.io": "Arbiscan",
+  "bscscan.com": "BscScan",
+  "polygonscan.com": "PolygonScan",
+  "snowtrace.io": "Snowtrace",
+  "gnosisscan.io": "GnosisScan",
+  "solscan.io": "Solscan",
+  "tronscan.org": "Tronscan",
+  "tonviewer.com": "Tonviewer",
+  "nearblocks.io": "NearBlocks",
+  "mempool.space": "mempool.space",
+  "blockchair.com": "Blockchair",
+};
+
+/** A transaction link named after its explorer ("Basescan ↗"); the hash is its hover text. */
+export function ExplorerLink({ chain, hash }: { chain: string; hash: string }) {
+  if (hash.startsWith("simulated")) return <span>simulated tx</span>;
+  const url = explorerTx(chain, hash);
+  if (!url)
+    return (
+      <span className="font-mono" title={hash}>
+        {shortHash(hash)}
+      </span>
+    );
+  const host = new URL(url).hostname.replace(/^www\./, "");
   return (
-    <div className="flex w-[58px] shrink-0 flex-col items-center gap-1.5 text-center sm:w-24">
-      <span className={`grid size-9 place-items-center rounded-full bg-surface-2 text-xs font-semibold ring-2 ${ring}`}>{icon ?? leg.label.slice(0, 1)}</span>
-      <span className="w-full truncate text-[11px] text-muted sm:text-xs">{leg.id === "intents" ? "NEAR Intents" : leg.id === "near" ? "Your account" : leg.id === "pool" ? "Staked" : "Source"}</span>
-    </div>
+    <a href={url} target="_blank" rel="noreferrer" title={hash} className="inline-flex items-center gap-1 whitespace-nowrap text-accent no-underline hover:underline">
+      {EXPLORER_NAMES[host] ?? host}
+      <ArrowUpRightIcon size={12} />
+      <span className="sr-only"> (opens in a new tab)</span>
+    </a>
   );
-}
-
-function Track({ state }: { state: "idle" | "moving" | "done" | "failed" }) {
-  return (
-    <div className="relative mt-[17px] h-0.5 min-w-2 flex-1 rounded-full bg-line">
-      {state === "done" && <div className="absolute inset-0 rounded-full bg-accent" />}
-      {state === "failed" && <div className="absolute inset-0 rounded-full bg-danger/70" />}
-      {state === "moving" && <span className="travel absolute -top-[3px] size-2 rounded-full bg-accent shadow-[0_0_8px_var(--accent)]" />}
-    </div>
-  );
-}
-
-function StepIcon({ state }: { state: Leg["state"] }) {
-  if (state === "active") return <span aria-label="in progress" className="size-5 shrink-0 animate-spin rounded-full border-2 border-line border-t-accent" />;
-  if (state === "waiting") return <span aria-label="waiting" className="grid size-5 shrink-0 place-items-center rounded-full bg-warn text-xs text-bg">!</span>;
-  if (state === "done") return <span aria-label="done" className="grid size-5 shrink-0 place-items-center rounded-full bg-accent text-xs text-accent-ink">✓</span>;
-  if (state === "failed") return <span aria-label="failed" className="grid size-5 shrink-0 place-items-center rounded-full bg-danger text-xs text-bg">!</span>;
-  return <span aria-hidden className="size-5 shrink-0 rounded-full border-2 border-line" />;
 }
 
 /** Two arrows crossing: the swap inside NEAR Intents. */
 export function IntentsGlyph() {
   return (
-    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M4 7h13l-3-3M20 17H7l3 3" />
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7" />
     </svg>
   );
 }

@@ -1,43 +1,51 @@
 "use client";
 
+import { bigintToNumber } from "@anywalletkit/core";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { KNOWN_MINIMUM_USD, MEMO_CHAINS, NEAR_ICON, PINNED_CHAINS, SOURCE_ASSETS, findAsset, looksLikeAddress, type SourceAsset } from "@/lib/assets";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { KNOWN_MINIMUM_USD, PINNED_CHAINS, SOURCE_ASSETS, findAsset, looksLikeAddress, type SourceAsset } from "@/lib/assets";
+import { NEAR_N_PATH } from "@/lib/brand";
 import { addRecord, getFlow, newId, updateFlow, type FlowRecord } from "@/lib/history";
 import { DEMO_ACCOUNT, SUGGESTED_POOL } from "@/lib/near/config";
-import { checkRecipient, deliveredOnChain, instantStNearEligible, nearClient } from "@/lib/near/reads";
+import { checkRecipient, deliveredOnChain, instantStNearEligible, nearClient, nearSpendable } from "@/lib/near/reads";
 import { getStatus, listTokens, requestQuote, submitDepositTx } from "@/lib/oneclick/client";
-import { addressInactiveAt, buildInboundQuoteRequest, deadlineMsFor, payCutoffMs, quoteDeadline } from "@/lib/oneclick/quote";
+import { NEAR_ASSET, STNEAR_ASSET, addressInactiveAt, buildInboundQuoteRequest, deadlineMsFor, payCutoffMs, quoteDeadline } from "@/lib/oneclick/quote";
 import { SIM_OUTCOMES, simulatedStatuses, type SimOutcome } from "@/lib/oneclick/simulate";
 import { deliveryTxHash, depositTxHashes, fundsView, isFinal, isTerminal, phaseOf, reportedDelivery, type Phase } from "@/lib/oneclick/status";
 import type { QuoteRequest, QuoteResponse, StatusResponse } from "@/lib/oneclick/types";
-import { connectPayer, PAYER_LABEL, type Payer } from "@/lib/pay";
+import { connectPayer, type Payer } from "@/lib/pay";
 import { ago, clock, dateTime, duration, formatNear, formatUnits, money, parseUnits, percent, shortAccount } from "@/lib/format";
 import { stakeAmountAfterDelivery, type StakeAmount } from "@/lib/stakeAmount";
+import { FRESH_ACCOUNT_STORAGE, keptFromDelivery, nearForUsd, sharesFor, stakedFromDelivery, yearlyReward } from "@/lib/stakeEstimate";
 import {
-  LIQUID_OPTIONS, MIN_STAKE, liquidStaking, nativeStaking, poolStatus, refusalText, stakeOverhead, stakingErrorText,
-  type LiquidPreset, type LiquidStakeQuote, type NearPoolInfo, type NearStakeQuote,
+  LIQUID_OPTIONS, MIN_STAKE, NUM_EPOCHS_TO_UNLOCK, liquidStaking, nativeStaking, refusalText, stakeOverhead, stakingErrorText,
+  type LiquidPoolInfo, type LiquidPreset, type LiquidStakeQuote, type NearEpoch, type NearPoolInfo, type NearStakeQuote,
 } from "@/lib/staking";
 import { DRY_REFUND } from "@/lib/dryrun";
-import { useAsync, useNow } from "@/lib/useAsync";
+import { useAsync, useNow, type AsyncState } from "@/lib/useAsync";
 import { useApp } from "./AppProvider";
 import { DepositPanel } from "./DepositPanel";
-import { FundsRoute, IntentsGlyph } from "./FundsRoute";
-import { LogoMark } from "./Logo";
+import { Disclosure } from "./Disclosure";
+import { unbondingWindow, useEpoch } from "./EpochClock";
+import { ExplorerLink, IntentsGlyph, RouteStrip, StepList, type RouteNode, type StepState, type TrackStep } from "./FundsRoute";
+import { ShieldCheckIcon } from "./icons";
+import { InfoHint } from "./InfoHint";
 import { Modal } from "./Modal";
-import { PayWithSheet } from "./PayWithSheet";
-import { TxLink } from "./TxLink";
+import { PayWithButton, PayWithSheet, TokenIcon } from "./PayWithSheet";
+import { PoolAvatar, compactNear, poolBadge, poolName } from "./PoolAvatar";
+import { Box, CTA, CardShell, Connector, DetailRow, HowItWorks, ModeDot, Notice, QUIET, StakeIntro, TargetChoice, TargetRow, nearAmount } from "./StakeCard";
+import { StatusBadge, type StatusTone } from "./StatusBadge";
 import { TxPreview } from "./TxPreview";
 import { ValidatorList } from "./ValidatorList";
-import { Banner, Icon, Panel, Pill, PillTabs, Row, Rows, Spinner } from "./ui";
+import { Skeleton, Spinner } from "./ui";
 
 export type Target = { kind: "native"; pool: string } | { kind: "liquid"; preset: LiquidPreset } | { kind: "stnear" };
 
-/** Storage a fresh implicit account holds after the delivery creates it (182 bytes, mainnet tx AQAkvxyT…). */
-const FRESH_ACCOUNT_STORAGE = 182n * 10n ** 19n;
-
 const targetLabel = (t: Target) => (t.kind === "native" ? t.pool : t.kind === "liquid" ? LIQUID_OPTIONS.find((o) => o.id === t.preset)!.symbol : "stNEAR");
 const targetKey = (t: Target) => (t.kind === "native" ? `native:${t.pool}` : t.kind === "liquid" ? `liquid:${t.preset}` : "stnear");
+/** The name people read: "astro-stakers", "rNEAR", "stNEAR". */
+const targetShort = (t: Target) => (t.kind === "native" ? poolName(t.pool) : targetLabel(t));
 
 function parseTarget(key: string | undefined): Target | null {
   if (!key) return null;
@@ -49,9 +57,189 @@ function parseTarget(key: string | undefined): Target | null {
 
 type Stage = "setup" | "review" | "track";
 
+// ── Data the card shows about the target (pool / token), shared by the form and the tracker ─────────
+
+type LiquidData = { info: LiquidPoolInfo; apr: number | null };
+interface TargetData {
+  pool: AsyncState<NearPoolInfo | null>;
+  liquid: Record<LiquidPreset, AsyncState<LiquidData>>;
+  instant: AsyncState<{ ok: boolean; reason: string } | null>;
+}
+
+function useLiquidData(preset: LiquidPreset, demo: ReturnType<typeof useApp>["demo"]): AsyncState<LiquidData> {
+  const ls = useMemo(() => liquidStaking(demo, preset), [demo, preset]);
+  return useAsync(() => Promise.all([ls.getPoolInfo(), ls.getApr().catch(() => null)]).then(([info, apr]) => ({ info, apr })), [ls]);
+}
+
+/**
+ * NEAR of a delivery that stays on the account (the gas reserve and the stake's prepaid gas), for
+ * the preview only. A dry run replays a delivery to a brand-new account, as its simulated stake does.
+ * Once the delivery is on the account (`delivered`), it is taken out of what the account could
+ * already spend, so the preview still describes this delivery.
+ */
+function useKept(target: Target, recipient: string | null, simulated: boolean, demo: ReturnType<typeof useApp>["demo"], delivered: bigint | null = null): AsyncState<bigint> {
+  const kind = target.kind === "native" ? "native" : target.kind === "liquid" ? target.preset : null;
+  return useAsync(async () => {
+    if (!kind) return 0n;
+    const mod = kind === "native" ? nativeStaking(demo) : liquidStaking(demo, kind);
+    const overhead = await stakeOverhead(mod, nearClient().rpc);
+    if (simulated || !recipient) return keptFromDelivery({ overhead, spendable: 0n, fresh: true });
+    const [spendable, r] = await Promise.all([nearSpendable(recipient), checkRecipient(recipient)]);
+    if (delivered === null) return keptFromDelivery({ overhead, spendable, fresh: r.ok && !r.exists });
+    // what the account could spend before the delivery; below zero when the delivery paid a new account's storage
+    const kept = overhead - (spendable - delivered);
+    return kept > 0n ? kept : 0n;
+  }, [kind, recipient, simulated, demo, delivered]);
+}
+
+interface TargetView {
+  name: string;
+  short: string;
+  avatar: ReactNode;
+  apr: number | null;
+  meta: ReactNode;
+  badge: ReactNode;
+  problem: { text: string; tone: "danger" | "warn" } | null;
+  fee: { label: string; text: string } | null;
+  /** Liquid token price, yocto per whole token. */
+  price: bigint | null;
+}
+
+function trustBadge(label: string, tone: StatusTone, details: string) {
+  return (
+    <InfoHint label={label} trigger={<StatusBadge tone={tone} icon={tone === "success" ? <ShieldCheckIcon size={14} /> : undefined}>{label}</StatusBadge>}>
+      {details}
+    </InfoHint>
+  );
+}
+
+function targetView(t: Target, d: TargetData, recipient: string | null): TargetView {
+  if (t.kind === "native") {
+    const p = d.pool.data && d.pool.data.id === t.pool ? d.pool.data : null;
+    const name = poolName(t.pool);
+    const b = p ? poolBadge(p) : null;
+    const fee = p && p.feePercent !== null ? percent(p.feePercent, p.feePercent % 1 ? 1 : 0) : null;
+    return {
+      name,
+      short: name,
+      avatar: <PoolAvatar name={name} />,
+      apr: p?.apr ?? null,
+      meta: p ? `${percent(p.apr)} APR · ${fee ? `${fee} fee` : "fee —"} · ${compactNear(p.stake)} NEAR in pool` : d.pool.error || <Skeleton className="mt-1 h-4 w-44" />,
+      badge: b ? trustBadge(b.label, b.tone, b.details) : null,
+      problem: p && !p.eligible ? { text: `Can't take stake: ${p.refusals.map(refusalText).join(", ")}.`, tone: "danger" } : null,
+      fee: fee ? { label: "Pool fee", text: `${fee} of rewards, already in the APR` } : null,
+      price: null,
+    };
+  }
+  if (t.kind === "liquid") {
+    const o = LIQUID_OPTIONS.find((x) => x.id === t.preset)!;
+    const s = d.liquid[t.preset];
+    const l = s.data;
+    const ok = !!l && !l.info.paused && l.info.codeHashKnown;
+    const badge = !l
+      ? null
+      : ok
+        ? trustBadge("Verified", "success", `Checked live: ${o.contract} runs known code (pinned by account and code hash) and is not paused. One signature after delivery mints the token; nothing is ever sent to it by transfer.`)
+        : l.info.paused
+          ? trustBadge("Paused", "danger", `${o.contract} is paused right now, so a delivery couldn't be staked.`)
+          : trustBadge("Unknown code", "danger", `${o.contract} runs code this app doesn't know yet (an upgrade), so it won't stake into it.`);
+    return {
+      name: o.label,
+      short: o.symbol,
+      avatar: <PoolAvatar name={o.symbol} tone="liquid" />,
+      apr: l?.apr ?? null,
+      meta: l ? `${percent(l.apr)} APR · 1 ${o.symbol} = ${formatUnits(l.info.price, 24, 4)} NEAR` : s.error ? "unavailable right now" : <Skeleton className="mt-1 h-4 w-44" />,
+      badge,
+      problem: l && !ok ? { text: `${o.label} can't take stake right now. Pick a validator pool instead.`, tone: "danger" } : null,
+      fee: l ? { label: "Protocol fee", text: `${(l.info.feeBps / 100).toFixed(l.info.feeBps % 100 ? 1 : 0)}% of rewards, already in the APR` } : null,
+      price: l?.info.price ?? null,
+    };
+  }
+  const el = d.instant.data;
+  return {
+    name: "Meta Pool stNEAR",
+    short: "stNEAR",
+    avatar: <PoolAvatar name="stNEAR" tone="instant" />,
+    apr: null,
+    meta: "Delivered straight by 1Click · no NEAR signature",
+    badge: d.instant.loading ? <Spinner /> : el?.ok ? trustBadge("Ready", "success", `${recipient ?? "Your account"} can receive stNEAR.`) : trustBadge("Not available", "attention", el?.reason ?? d.instant.error),
+    problem: !d.instant.loading && !el?.ok ? { text: `${el?.reason ?? d.instant.error} Pick a validator pool or rNEAR instead.`, tone: "warn" } : null,
+    fee: null,
+    price: null,
+  };
+}
+
+/** USD value of NEAR (or stNEAR) at a price, for display. */
+const usdOf = (yocto: bigint, price: number | null | undefined) => (price ? (bigintToNumber(yocto / 10n ** 16n) / 1e8) * price : null);
+
+/** "Unlocks in about 24 h", with the epoch arithmetic in a hint. */
+function unlockFacts(t: Target, e: NearEpoch | null, now: number): { value: string; hint: string } {
+  if (t.kind === "stnear") return { value: "Instantly, at Meta Pool's discount", hint: "Instant unstake later uses Meta Pool's own live discount." };
+  const epochH = e ? (e.epochMs / 3_600_000).toFixed(1) : "7";
+  if (!e) return { value: t.kind === "native" ? "In about a day" : "In about 1–1.5 days", hint: `An epoch lasts about ${epochH} h. Unstaking takes 4 epoch boundaries (liquid tokens 4–5 or more).` };
+  const w = unbondingWindow(e);
+  const h = (ms: number) => Math.max(1, Math.round((ms - now) / 3_600_000));
+  if (t.kind === "native")
+    return {
+      value: `Unlocks in about ${h(w.at)} h`,
+      hint: `An epoch lasts about ${epochH} h. Unstake now and it unlocks at epoch ${(e.height + NUM_EPOCHS_TO_UNLOCK).toString()}, around ${dateTime(w.at)}; one epoch later if the transaction lands after this epoch ends.`,
+    };
+  return {
+    value: `Unlocks in about ${h(w.at)}–${h(w.ifLate)} h or more`,
+    hint: `rNEAR and LiNEAR unstake in 4–5 or more epochs (an epoch lasts about ${epochH} h); the exact epoch shows after you unstake.`,
+  };
+}
+
+const KEPT_HINT =
+  "A small gas reserve stays on your account so you can unstake later: NEAR holds back a transaction's prepaid gas when it accepts it and refunds the unused part seconds later. You can withdraw what stays any time.";
+
+function keptText(kept: bigint | undefined) {
+  if (kept === undefined) return <Skeleton className="ml-auto h-4 w-40" />;
+  if (kept === 0n) return "Nothing extra: your account already holds the gas reserve";
+  return `≈ ${nearAmount(kept)} NEAR for gas, so you can unstake later`;
+}
+
+/** The "You get" panel: what ends up staked, its value, what it earns and how fast it unlocks. */
+function YouGet({ where, big, usd, earns, unlock, hint }: { where: string; big: ReactNode; usd: number | null; earns: ReactNode; unlock: { value: string; hint: string }; hint: string }) {
+  return (
+    <Box className="mt-2">
+      <div className="flex items-center justify-between gap-4 text-[13px] leading-5 text-muted">
+        <span className="inline-flex items-center gap-0.5">
+          You get <InfoHint label="How this is worked out">{hint}</InfoHint>
+        </span>
+        <span className="truncate">{where}</span>
+      </div>
+      <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <span className="text-[32px] font-semibold leading-10 tracking-[-0.02em] tabular-nums">{big}</span>
+        {usd !== null && <span className="text-sm text-muted">≈ {money(usd)}</span>}
+      </div>
+      <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-4 border-t border-line pt-3">
+        <div>
+          <div className="text-xs leading-4 text-muted">Earns</div>
+          <div className="text-sm font-medium leading-5">{earns}</div>
+        </div>
+        <div>
+          <div className="inline-flex items-center gap-0.5 text-xs leading-4 text-muted">
+            If you unstake <InfoHint label="When unstaked NEAR unlocks">{unlock.hint}</InfoHint>
+          </div>
+          <div className="text-sm font-medium leading-5">{unlock.value}</div>
+        </div>
+      </div>
+    </Box>
+  );
+}
+
+function earnsText(t: Target, staked: bigint | null, apr: number | null): ReactNode {
+  if (t.kind === "stnear") return "Grows with Meta Pool's rewards";
+  if (staked === null || apr === null) return "—";
+  return `≈ ${nearAmount(yearlyReward(staked, apr))} NEAR a year`;
+}
+
+// ── The form ────────────────────────────────────────────────────────────────────────────────────────
+
 export function StakeFlow() {
   const params = useSearchParams();
-  const { near, dryRun, demo } = useApp();
+  const { near, dryRun, demo, restoring, connecting: nearConnecting, connectNear } = useApp();
   // a flow reopened from Recent activity (?flow=…) resumes at its status; this component renders on the client only
   const [resumed] = useState(() => {
     const id = params.get("flow");
@@ -60,6 +248,8 @@ export function StakeFlow() {
     return r && t ? { r, t } : null;
   });
   const [target, setTarget] = useState<Target>(() => resumed?.t ?? { kind: "native", pool: params.get("pool") || SUGGESTED_POOL });
+  // the validator pool comes back when the user switches to a liquid token and back
+  const [pickedPool, setPickedPool] = useState(() => (target.kind === "native" ? target.pool : SUGGESTED_POOL));
   const [asset, setAsset] = useState<SourceAsset | null>(() => (resumed ? findAsset(resumed.r.source.chain, resumed.r.source.symbol) : findAsset("eip155:8453", "USDC")) ?? null);
   const [amountText, setAmountText] = useState("5");
   const [refundTo, setRefundTo] = useState("");
@@ -73,6 +263,11 @@ export function StakeFlow() {
   );
   const [err, setErr] = useState("");
   const [quoting, setQuoting] = useState(false);
+  // "send it by hand": no wallet on the source chain, the quote's deposit address is paid manually
+  const [manual, setManual] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [editRefund, setEditRefund] = useState(false);
+  const now = useNow(60_000);
 
   const recipient = near?.accountId ?? (dryRun ? DEMO_ACCOUNT : null);
   const amount = asset ? parseUnits(amountText, asset.decimals) : null;
@@ -80,6 +275,20 @@ export function StakeFlow() {
   const price = asset ? prices.data?.get(asset.assetId) : undefined;
   const usd = amount !== null && price && asset ? Number(formatUnits(amount, asset.decimals, 8).replace(/,/g, "")) * price : null;
   const minUsd = asset ? KNOWN_MINIMUM_USD[asset.chain] : undefined;
+  const nearUsd = prices.data?.get(NEAR_ASSET);
+  const stNearUsd = prices.data?.get(STNEAR_ASSET);
+
+  const staking = useMemo(() => nativeStaking(demo), [demo]);
+  const pool = useAsync(() => staking.getPool(pickedPool), [staking, pickedPool]);
+  const rnear = useLiquidData("rnear", demo);
+  const linear = useLiquidData("linear", demo);
+  const instant = useAsync(
+    () => (target.kind !== "stnear" ? Promise.resolve(null) : recipient ? instantStNearEligible(recipient) : Promise.resolve({ ok: false, reason: "Connect a NEAR wallet." })),
+    [recipient, target.kind],
+  );
+  const data: TargetData = { pool, liquid: { rnear, linear }, instant };
+  const epoch = useEpoch();
+  const kept = useKept(target, recipient, dryRun, demo);
 
   const connect = useCallback(async () => {
     if (!asset?.family) return;
@@ -103,9 +312,18 @@ export function StakeFlow() {
     if (!asset || amount === null || amount <= 0n) return setErr("Enter an amount.");
     if (!recipient) return setErr("Connect your NEAR wallet: the NEAR is delivered to it.");
     const refund = refundTo.trim() || (dryRun && asset.family ? DRY_REFUND[asset.family] ?? "" : "");
-    if (!refund) return setErr(`Enter your own ${asset.chainLabel} address for refunds.`);
-    if (!looksLikeAddress(asset.chain, refund)) return setErr(`That doesn't look like a ${asset.chainLabel} address.`);
-    if (!dryRun && !ownWallet && payer?.address !== refund) return setErr("Confirm the refund address is your own wallet, not an exchange deposit address.");
+    // the refund address and its confirmation live in Details: open it where the fix is
+    const refundProblem = !refund
+      ? `Enter your own ${asset.chainLabel} address for refunds.`
+      : !looksLikeAddress(asset.chain, refund)
+        ? `That doesn't look like a ${asset.chainLabel} address.`
+        : !dryRun && !ownWallet && payer?.address !== refund
+          ? "Confirm the refund address is your own wallet, not an exchange deposit address."
+          : null;
+    if (refundProblem) {
+      setDetailsOpen(true);
+      return setErr(refundProblem);
+    }
     setQuoting(true);
     try {
       const r = await checkRecipient(recipient);
@@ -171,121 +389,299 @@ export function StakeFlow() {
           setQuote(null);
           setStage("setup");
         }}
+        manual={manual}
+        data={data}
+        epoch={epoch.data ?? null}
       />
     );
 
+  const tv = targetView(target, data, recipient);
+  const instantTarget = target.kind === "stnear";
+  const delivered = instantTarget ? null : nearForUsd(usd, nearUsd);
+  const staked = delivered !== null && kept.data !== undefined ? stakedFromDelivery(delivered, kept.data) : null;
+  const stNear = instantTarget ? nearForUsd(usd, stNearUsd) : null;
+  const shares = target.kind === "liquid" && staked !== null && tv.price ? sharesFor(staked, tv.price) : null;
+  const loadingNumbers = amount !== null && amount > 0n && (prices.loading || (!instantTarget && kept.loading));
+  const big =
+    instantTarget && stNear !== null ? (
+      `≈ ${nearAmount(stNear)} stNEAR`
+    ) : target.kind === "liquid" && shares !== null ? (
+      `≈ ${nearAmount(shares)} ${tv.short}`
+    ) : staked !== null && target.kind === "native" ? (
+      `≈ ${nearAmount(staked)} NEAR`
+    ) : loadingNumbers ? (
+      <Skeleton className="h-10 w-40" />
+    ) : (
+      "—"
+    );
+  const bigUsd = instantTarget ? (stNear !== null ? usdOf(stNear, stNearUsd) : null) : staked !== null ? usdOf(staked, nearUsd) : null;
+
+  const highest = target.kind === "native" && tv.apr !== null && [rnear.data?.apr, linear.data?.apr].every((a) => a === null || a === undefined || tv.apr! > a);
+  const hintLine =
+    target.kind === "native"
+      ? `${highest ? "Native staking pays the most here. " : ""}Unlocks about a day after you unstake.`
+      : target.kind === "liquid"
+        ? `You hold ${tv.short}, a token that grows in NEAR value. Unstaking takes 4–5 or more epochs.`
+        : "Costs more than staking yourself: compare it with a NEAR quote. Instant unstake uses Meta Pool's live discount.";
+
+  // refunds: auto-filled from the paying wallet, editable in Details
+  const refund = refundTo.trim();
+  const dryStandIn = dryRun && asset?.family ? DRY_REFUND[asset.family] : undefined;
+  const confirmOwn = !dryRun && payer?.address !== refund;
+  const showRefundInput = editRefund || (!payer && !dryStandIn);
+  const chain = asset?.chainLabel ?? "the source chain";
+  const detailsHint = !dryRun && !refund ? (
+    <span className="text-warn">Add a refund address</span>
+  ) : confirmOwn && !ownWallet ? (
+    <span className="text-warn">Confirm the refund address</span>
+  ) : (
+    `To ${recipient ? shortAccount(recipient) : "your NEAR account"}${refund ? ` · refunds to ${shortAccount(refund)}` : ""}`
+  );
+
+  // one primary action that says what comes next
+  const needsPayer = !dryRun && !!near && !!asset?.family && !payer && !manual;
+  const ctaKind: "wait" | "near" | "payer" | "quote" = !near ? (restoring ? "wait" : "near") : needsPayer ? "payer" : "quote";
+  const ctaLabel =
+    ctaKind === "wait"
+      ? "Checking for your NEAR wallet…"
+      : ctaKind === "near"
+        ? nearConnecting
+          ? "Connecting…"
+          : "Connect NEAR wallet"
+        : ctaKind === "payer"
+          ? connectingPayer
+            ? "Connecting…"
+            : `Connect a ${asset!.chainLabel} wallet`
+          : quoting
+            ? "Getting a quote…"
+            : dryRun
+              ? "Get a dry-run quote"
+              : payer
+                ? "Get quote"
+                : "Get a deposit address";
+  const ctaDisabled = ctaKind === "wait" || (ctaKind === "near" && nearConnecting) || (ctaKind === "payer" && connectingPayer) || (ctaKind === "quote" && (quoting || !asset));
+  let secondary: ReactNode = null;
+  let next: ReactNode = null;
+  if (ctaKind === "near") {
+    secondary = (
+      <button type="button" onClick={() => void getQuote()} disabled={quoting || !asset} className={QUIET}>
+        {quoting ? "Getting a dry-run quote…" : "Or get a dry-run quote: nothing to pay"}
+      </button>
+    );
+    next = "Your NEAR is delivered to your own NEAR account, so that comes first.";
+  } else if (near && dryRun) {
+    next = "Dry run: real quotes, no deposit address, nothing to pay.";
+  } else if (near && ctaKind === "payer") {
+    secondary = (
+      <button
+        type="button"
+        onClick={() => {
+          setManual(true);
+          setDetailsOpen(true);
+        }}
+        className={QUIET}
+      >
+        Or send it by hand instead
+      </button>
+    );
+    next = `Next: get a quote, pay from that wallet, then sign once in ${near.walletName} to stake.`;
+  } else if (near) {
+    if (manual && !payer && asset?.family)
+      secondary = (
+        <button type="button" onClick={() => setManual(false)} className={QUIET}>
+          Pay from a wallet instead
+        </button>
+      );
+    next = instantTarget
+      ? "Next: pay, and stNEAR arrives with no NEAR signature."
+      : payer
+        ? `Next: pay from ${payer.label}, then sign once in ${near.walletName} to stake.`
+        : `Next: send the exact amount to a one-time address, then sign once in ${near.walletName} to stake.`;
+  }
+
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-      <Panel className="flex flex-col gap-6 p-4 sm:p-6">
-        <section className="flex flex-col gap-3">
-          <h2 className="text-lg font-semibold">1 · What to stake into</h2>
-          <PillTabs
-            tabs={[
-              { id: "native", label: "Validator pool" },
-              { id: "liquid", label: "Liquid (rNEAR / LiNEAR)" },
-              { id: "stnear", label: "Instant stNEAR" },
-            ]}
-            value={target.kind}
-            onChange={(k) => setTarget(k === "native" ? { kind: "native", pool: target.kind === "native" ? target.pool : SUGGESTED_POOL } : k === "liquid" ? { kind: "liquid", preset: "rnear" } : { kind: "stnear" })}
-          />
-          {target.kind === "native" && <PoolCard pool={target.pool} onChange={() => setSheet("pool")} />}
-          {target.kind === "liquid" && <LiquidPicker preset={target.preset} onPick={(p) => setTarget({ kind: "liquid", preset: p })} />}
-          {target.kind === "stnear" && <InstantCard recipient={recipient} />}
-        </section>
-
-        <section className="flex flex-col gap-3">
-          <h2 className="text-lg font-semibold">2 · Pay with</h2>
-          <button type="button" onClick={() => setSheet("source")} className="btn-tactile justify-between px-4 py-3 text-left">
-            {asset ? (
-              <span className="flex items-center gap-3">
-                <span className="relative">
-                  <Icon src={asset.icon} alt={asset.symbol} size={32} />
-                  {asset.chainIcon !== asset.icon && (
-                    <span className="absolute -bottom-0.5 -right-0.5 rounded-full ring-2 ring-surface">
-                      <Icon src={asset.chainIcon} alt="" size={14} />
-                    </span>
-                  )}
-                </span>
-                <span className="flex flex-col">
-                  <span className="font-medium">{asset.symbol}</span>
-                  <span className="text-xs text-muted">on {asset.chainLabel}</span>
-                </span>
+    <>
+      <StakeIntro />
+      <CardShell id="stake-title" title="Stake NEAR" right={<ModeDot live={!dryRun}>{dryRun ? "Dry run" : "Live"}</ModeDot>}>
+        <Box className="mt-4 has-[#pay-amount:focus-visible]:ring-2 has-[#pay-amount:focus-visible]:ring-accent/70">
+          <div className="flex min-h-5 items-center justify-between gap-4 text-[13px] leading-5">
+            <label htmlFor="pay-amount" className="text-muted">
+              You pay
+            </label>
+            {payer && (
+              <span className="truncate text-muted">
+                from <span className="font-mono text-text">{shortAccount(payer.address)}</span>
               </span>
-            ) : (
-              <span>Pick a token</span>
             )}
-            <span className="text-sm text-muted">Change</span>
-          </button>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm text-muted">Amount</span>
-            <div className="flex items-center gap-2 rounded-xl border border-line bg-surface-2 px-3 focus-within:border-accent">
-              <input value={amountText} onChange={(e) => setAmountText(e.target.value)} inputMode="decimal" aria-label="Amount" className="min-w-0 flex-1 bg-transparent py-3 text-lg tabular-nums outline-none" />
-              <span className="text-muted">{asset?.symbol}</span>
-            </div>
-            <span className="text-xs text-muted">
-              {usd !== null ? `≈ ${money(usd)}` : " "}
-              {minUsd && usd !== null && usd < minUsd ? ` · ${asset?.chainLabel} currently has a $${minUsd} minimum` : ""}
-            </span>
-          </label>
-          {price && asset && (
-            <div className="flex flex-wrap gap-2">
-              {[5, 20, 50, 100].map((d) => (
-                <button key={d} type="button" onClick={() => setAmountText(formatUnits(BigInt(Math.round((d / price) * 10 ** Math.min(asset.decimals, 8))) * 10n ** BigInt(Math.max(0, asset.decimals - 8)), asset.decimals, 6).replace(/,/g, ""))} className="btn-tactile px-3 py-1.5 text-sm">
-                  ${d}
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
-
-        <section className="flex flex-col gap-3">
-          <h2 className="text-lg font-semibold">3 · Refunds and delivery</h2>
-          <Rows>
-            <Row label="NEAR delivered to" hint="always your connected account">
-              <span className="font-mono">{recipient ? shortAccount(recipient) : "connect a NEAR wallet"}</span>
-              {!near && recipient && <span className="block text-xs text-warn">dry run: the demo account</span>}
-            </Row>
-          </Rows>
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm text-muted">Refund address on {asset?.chainLabel ?? "the source chain"}</span>
+          </div>
+          <div className="mt-2 flex items-center gap-3">
             <input
-              value={refundTo}
-              onChange={(e) => {
-                setRefundTo(e.target.value);
-                // a ticked "my own wallet" vouched for the old text, not this one
-                setOwnWallet(false);
-              }}
-              placeholder={dryRun ? (asset?.family && DRY_REFUND[asset.family] ? "optional in dry run (a burn address stands in)" : "needed even in dry run for this chain") : "your own wallet address"}
-              spellCheck={false}
-              className="rounded-xl border border-line bg-surface-2 px-3 py-2.5 font-mono text-sm outline-none focus:border-accent"
+              id="pay-amount"
+              value={amountText}
+              onChange={(e) => setAmountText(e.target.value)}
+              inputMode="decimal"
+              autoComplete="off"
+              aria-describedby="pay-usd"
+              className="h-12 w-full min-w-0 flex-1 bg-transparent text-[32px] font-semibold leading-[48px] tracking-[-0.02em] tabular-nums outline-none focus-visible:outline-none sm:text-[40px]"
             />
-          </label>
-          {asset?.family && !payer && (
-            <button type="button" onClick={() => void connect()} disabled={connectingPayer} className="btn-tactile self-start px-3.5 py-2 text-sm font-medium">
-              {connectingPayer ? "Connecting…" : `Use my ${PAYER_LABEL[asset.family]}`}
-            </button>
+            <PayWithButton asset={asset} onClick={() => setSheet("source")} />
+          </div>
+          <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+            <p id="pay-usd" className="text-sm leading-5 text-muted">
+              {usd !== null ? `≈ ${money(usd)}` : amount === null && amountText.trim() ? "Enter an amount" : " "}
+              {minUsd && usd !== null && usd < minUsd && <span className="block text-warn">{asset?.chainLabel} currently has a ${minUsd} minimum</span>}
+            </p>
+            {price && asset && (
+              <div className="flex gap-1.5">
+                {[5, 20, 50, 100].map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    aria-label={`Pay about $${d}`}
+                    onClick={() => setAmountText(formatUnits(BigInt(Math.round((d / price) * 10 ** Math.min(asset.decimals, 8))) * 10n ** BigInt(Math.max(0, asset.decimals - 8)), asset.decimals, 6).replace(/,/g, ""))}
+                    className="relative min-h-8 rounded-full border border-line px-2.5 text-xs font-medium text-muted transition-colors after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] hover:border-muted hover:text-text"
+                  >
+                    ${d}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </Box>
+
+        <Connector />
+
+        <Box>
+          <div id="into-label" className="text-[13px] leading-5 text-muted">
+            You stake into
+          </div>
+          <TargetChoice
+            labelledBy="into-label"
+            value={target.kind === "native" ? "native" : target.kind === "liquid" ? target.preset : null}
+            options={[
+              { id: "native" as const, label: "Validator", rate: percentOrDash(pool.data?.id === pickedPool ? pool.data.apr : null) },
+              { id: "rnear" as const, label: "rNEAR", rate: percentOrDash(rnear.data?.apr) },
+              { id: "linear" as const, label: "LiNEAR", rate: percentOrDash(linear.data?.apr) },
+            ]}
+            onChange={(k) => setTarget(k === "native" ? { kind: "native", pool: pickedPool } : { kind: "liquid", preset: k })}
+          />
+          <TargetRow
+            avatar={tv.avatar}
+            title={tv.name}
+            meta={tv.meta}
+            badge={tv.badge}
+            onClick={target.kind === "native" ? () => setSheet("pool") : undefined}
+            clickLabel={target.kind === "native" ? `Change pool. Selected: ${tv.name}` : undefined}
+          />
+          {tv.problem && <p className={`mt-2 text-[13px] leading-5 ${tv.problem.tone === "danger" ? "text-danger" : "text-warn"}`}>{tv.problem.text}</p>}
+          <p className="mt-2 text-[13px] leading-5 text-muted">{hintLine}</p>
+          <button
+            type="button"
+            aria-pressed={instantTarget}
+            onClick={() => setTarget(instantTarget ? { kind: "native", pool: pickedPool } : { kind: "stnear" })}
+            className="mt-1 flex min-h-11 w-full items-center gap-2.5 rounded-lg text-left text-[13px] leading-5 text-muted hover:text-text"
+          >
+            <span aria-hidden className={`grid size-4 shrink-0 place-items-center rounded-full border-2 ${instantTarget ? "border-accent" : "border-line"}`}>
+              {instantTarget && <span className="size-1.5 rounded-full bg-accent" />}
+            </span>
+            <span>
+              <span className="font-medium text-text">Instant stNEAR</span>: delivered by 1Click, no NEAR signature, costs more
+            </span>
+          </button>
+        </Box>
+
+        <YouGet
+          where={target.kind === "native" ? `Staked in ${tv.short}` : `${tv.short} on your account`}
+          big={big}
+          usd={bigUsd}
+          earns={earnsText(target, staked, tv.apr)}
+          unlock={unlockFacts(target, epoch.data ?? null, now)}
+          hint={
+            instantTarget
+              ? "An estimate at today's prices. The quote shows exactly how much stNEAR arrives."
+              : "An estimate at today's prices. The quote is exact; what is staked is exactly what arrives, minus the gas reserve kept on your account."
+          }
+        />
+
+        <Disclosure className="mt-4" summary="Details" hint={detailsHint} open={detailsOpen} onOpenChange={setDetailsOpen}>
+          <dl className="text-[13px] leading-5">
+            <DetailRow label={instantTarget ? "stNEAR goes to" : "NEAR goes to"}>
+              {recipient ? <span className="font-mono">{shortAccount(recipient)}</span> : "your NEAR account"}
+              {delivered !== null && ` · ≈ ${nearAmount(delivered)} NEAR`}
+              {!near && recipient && <span className="block text-warn">the demo account, dry run</span>}
+            </DetailRow>
+            {!instantTarget && (
+              <DetailRow label="Kept on your account" hint={<InfoHint label="Why some NEAR stays on your account">{KEPT_HINT}</InfoHint>}>
+                {keptText(kept.data)}
+              </DetailRow>
+            )}
+            <DetailRow label="If anything fails">
+              {refund ? (
+                <>
+                  Refund to <span className="font-mono">{shortAccount(refund)}</span> on {chain}
+                </>
+              ) : dryStandIn ? (
+                "Nothing to refund in a dry run"
+              ) : dryRun ? (
+                <span className="text-warn">Needed even in a dry run for {chain}</span>
+              ) : (
+                <span className="text-warn">Add your own {chain} address</span>
+              )}
+              {(payer || dryStandIn) && (
+                <button type="button" onClick={() => setEditRefund(!editRefund)} aria-expanded={showRefundInput} className="ml-2 font-medium text-accent hover:underline">
+                  {editRefund ? "Done" : refund ? "Change" : "Add one"}
+                </button>
+              )}
+            </DetailRow>
+            {tv.fee && <DetailRow label={tv.fee.label}>{tv.fee.text}</DetailRow>}
+          </dl>
+          {showRefundInput && (
+            <label className="mt-2 flex flex-col gap-1.5">
+              <span className="text-[13px] text-muted">Refund address on {chain}</span>
+              <input
+                value={refundTo}
+                onChange={(e) => {
+                  setRefundTo(e.target.value);
+                  // a ticked "my own wallet" vouched for the old text, not this one
+                  setOwnWallet(false);
+                }}
+                placeholder={dryRun ? (dryStandIn ? "optional in a dry run (a burn address stands in)" : "needed even in a dry run for this chain") : "your own wallet address"}
+                spellCheck={false}
+                autoComplete="off"
+                className="min-h-11 rounded-xl border border-line bg-surface px-3 font-mono text-sm outline-none focus:border-accent"
+              />
+            </label>
           )}
-          {payer && <p className="text-xs text-muted">Paying from {payer.label} · {shortAccount(payer.address)}</p>}
-          {!dryRun && payer?.address !== refundTo.trim() && (
-            <label className="flex items-start gap-2 text-sm">
-              <input type="checkbox" checked={ownWallet} onChange={(e) => setOwnWallet(e.target.checked)} className="mt-1 accent-[var(--accent)]" />
+          {confirmOwn && (
+            <label className="mt-3 flex min-h-11 items-start gap-2.5 text-[13px] leading-5">
+              <input type="checkbox" checked={ownWallet} onChange={(e) => setOwnWallet(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--accent)]" />
               <span>This is my own wallet, not an exchange deposit address. Refunds sent to an exchange can be lost.</span>
             </label>
           )}
-        </section>
+        </Disclosure>
 
-        {err && <Banner tone="danger" title="Can't quote yet">{err}</Banner>}
-        <button type="button" onClick={() => void getQuote()} disabled={quoting || !asset} className="btn-tactile-accent btn-tactile-lg justify-center px-6 py-3.5 text-base">
-          {quoting ? "Getting a quote…" : dryRun ? "Get a dry-run quote" : "Get quote"}
+        {err && (
+          <Notice tone="danger" title="Can't quote yet" className="mt-4">
+            {err}
+          </Notice>
+        )}
+        <button
+          type="button"
+          onClick={() => {
+            if (ctaKind === "near") void connectNear();
+            else if (ctaKind === "payer") void connect();
+            else if (ctaKind === "quote") void getQuote();
+          }}
+          disabled={ctaDisabled}
+          className={`${CTA} mt-4`}
+        >
+          {ctaLabel}
         </button>
-      </Panel>
+        {secondary && <div className="mt-2 flex justify-center text-center">{secondary}</div>}
+        {next && <p className="mt-2 text-center text-[13px] leading-5 text-muted">{next}</p>}
+      </CardShell>
 
-      <aside className="flex flex-col gap-3">
-        <Banner tone={dryRun ? "warn" : "accent"} title={dryRun ? "Dry run is on" : "Live mode"}>
-          {dryRun ? "Real 1Click quotes and real pool checks. No deposit address is shown and nothing can be paid." : "Quotes are payable. Your NEAR account receives the delivery; you sign the stake."}
-        </Banner>
-        <Facts />
-      </aside>
+      <HowItWorks />
 
       {sheet === "source" && (
         <PayWithSheet
@@ -314,126 +710,29 @@ export function StakeFlow() {
             compact
             picked={target.kind === "native" ? target.pool : undefined}
             onPick={(p) => {
+              setPickedPool(p.id);
               setTarget({ kind: "native", pool: p.id });
               setSheet(null);
             }}
           />
         </Modal>
       )}
-    </div>
+    </>
   );
 }
 
-function Facts() {
-  return (
-    <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4 text-sm text-muted">
-      <p className="font-medium text-text">Good to know</p>
-      <p>An epoch is about 7 h (43 200 blocks; the clock on Portfolio is measured). Native unstaking takes 4 epoch boundaries: about 21–28 h.</p>
-      <p>rNEAR and LiNEAR unstake in 4–5+ epochs (≈ 21–35 h or more); the exact epoch shows after you unstake.</p>
-      <p>
-        About 0.05 NEAR stays on your account so you can unstake later: NEAR holds back a transaction&apos;s prepaid gas when it accepts it and refunds the unused part seconds later. A
-        brand-new implicit account is created by the delivery itself.
-      </p>
-      <p>Only the NEAR delivered by this swap is staked, never what was already on your account.</p>
-    </div>
-  );
+const percentOrDash = (v: number | null | undefined) => (v === null || v === undefined ? "—" : percent(v));
+
+/** Step timings like a stopwatch: 0:38, 12:05, 1:02:10. */
+function mss(ms: number): string {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(t / 3600);
+  const m = Math.floor((t % 3600) / 60);
+  const s = String(t % 60).padStart(2, "0");
+  return h ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
-function PoolCard({ pool, onChange }: { pool: string; onChange: () => void }) {
-  const { demo } = useApp();
-  const staking = useMemo(() => nativeStaking(demo), [demo]);
-  const info = useAsync(() => staking.getPool(pool), [staking, pool]);
-  const p = info.data;
-  const st = p ? poolStatus(p) : null;
-  return (
-    <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate font-medium">{pool}</p>
-          <p className="text-sm text-muted">
-            {p ? (
-              <>
-                {p.feePercent !== null ? `${percent(p.feePercent, 0)} fee` : "fee —"} · <span className="text-accent">{percent(p.apr)} APR</span> · {formatUnits(p.stake / 10n ** 24n, 0)} NEAR staked
-              </>
-            ) : info.error ? (
-              info.error
-            ) : (
-              <Spinner />
-            )}
-          </p>
-        </div>
-        <button type="button" onClick={onChange} className="btn-tactile shrink-0 px-3 py-1.5 text-sm font-medium">
-          Change
-        </button>
-      </div>
-      {p && st && (
-        <div className="flex flex-wrap gap-1.5">
-          <Pill tone={st.tone}>{st.label}</Pill>
-          {p.codeHashKnown && <Pill>standard pool code</Pill>}
-          {p.paused === false && <Pill>not paused</Pill>}
-          {p.inNextSet && <Pill>in next epoch&apos;s set</Pill>}
-        </div>
-      )}
-      {p && !p.eligible && <p className="text-sm text-danger">Can&apos;t take stake: {p.refusals.map(refusalText).join(", ")}.</p>}
-    </div>
-  );
-}
-
-function LiquidPicker({ preset, onPick }: { preset: LiquidPreset; onPick: (p: LiquidPreset) => void }) {
-  const { demo } = useApp();
-  return (
-    <div className="grid gap-2 sm:grid-cols-2">
-      {LIQUID_OPTIONS.map((o) => (
-        <LiquidOption key={o.id} id={o.id} picked={preset === o.id} onPick={() => onPick(o.id)} demo={demo} />
-      ))}
-      <p className="text-xs text-muted sm:col-span-2">
-        Minted with one signature after delivery (deposit_and_stake on the token contract, pinned by account and code hash). Tokens are never sent to these contracts by
-        transfer: they have no ft_on_transfer.
-      </p>
-    </div>
-  );
-}
-
-function LiquidOption({ id, picked, onPick, demo }: { id: LiquidPreset; picked: boolean; onPick: () => void; demo: ReturnType<typeof useApp>["demo"] }) {
-  const o = LIQUID_OPTIONS.find((x) => x.id === id)!;
-  const ls = useMemo(() => liquidStaking(demo, id), [demo, id]);
-  const info = useAsync(() => Promise.all([ls.getPoolInfo(), ls.getApr().catch(() => null)]), [ls]);
-  return (
-    <button type="button" aria-pressed={picked} onClick={onPick} className={`flex flex-col gap-1 rounded-2xl border p-4 text-left transition ${picked ? "border-liquid/70 bg-liquid/10" : "border-line bg-surface hover:border-muted/60"}`}>
-      <span className="flex items-center justify-between gap-2">
-        <span className="font-medium">{o.label}</span>
-        {id === "rnear" && <Pill tone="liquid">Rhea</Pill>}
-      </span>
-      <span className="text-xs text-muted">{o.contract}</span>
-      <span className="text-sm">
-        {info.data ? (
-          <>
-            <span className="text-accent">{percent(info.data[1])} APR</span> · 1 {o.symbol} = {formatUnits(info.data[0].price, 24, 4)} NEAR
-            {info.data[0].paused && <span className="text-danger"> · paused</span>}
-          </>
-        ) : info.error ? (
-          <span className="text-muted">unavailable</span>
-        ) : (
-          <Spinner />
-        )}
-      </span>
-    </button>
-  );
-}
-
-function InstantCard({ recipient }: { recipient: string | null }) {
-  const el = useAsync(() => (recipient ? instantStNearEligible(recipient) : Promise.resolve({ ok: false, reason: "Connect a NEAR wallet." })), [recipient]);
-  return (
-    <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4 text-sm">
-      <p className="font-medium">Meta Pool stNEAR, delivered straight by 1Click</p>
-      <p className="text-muted">
-        No NEAR signature at all. It costs more than staking yourself: the quote shows exactly how much stNEAR arrives, so compare it with a NEAR quote for the same amount.
-        Instant unstake later uses Meta Pool&apos;s own live discount.
-      </p>
-      {el.loading ? <Spinner /> : el.data?.ok ? <Pill tone="accent">{recipient} can receive stNEAR</Pill> : <p className="text-warn">{el.data?.reason ?? el.error} Pick a validator pool or rNEAR instead.</p>}
-    </div>
-  );
-}
+const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 // ── Review, deposit, tracking, stake ───────────────────────────────────────────────────────────
 
@@ -449,6 +748,9 @@ function QuoteAndTrack({
   connectingPayer,
   onConnectPayer,
   onRestart,
+  manual,
+  data,
+  epoch,
 }: {
   stage: Stage;
   setStage: (s: Stage) => void;
@@ -462,8 +764,12 @@ function QuoteAndTrack({
   connectingPayer: boolean;
   onConnectPayer: (() => void) | null;
   onRestart: () => void;
+  /** The user chose to send it by hand: the deposit address comes first, a wallet second. */
+  manual: boolean;
+  data: TargetData;
+  epoch: NearEpoch | null;
 }) {
-  const { dryRun } = useApp();
+  const { dryRun, near, demo } = useApp();
   const res = quote.res;
   const isDry = quote.req.dry;
   const now = useNow(1000);
@@ -532,208 +838,584 @@ function QuoteAndTrack({
   const refundFee = res.quote.refundFee ? BigInt(res.quote.refundFee) : null;
   const left = deadline !== null ? deadline - now : null;
 
-  return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px]">
-      <Panel className="flex flex-col gap-5 p-4 sm:p-6">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold">{stage === "review" ? "Your quote" : instant ? "Instant stNEAR" : `Staking into ${targetLabel(target)}`}</h2>
-            <p className="text-sm text-muted">
-              {isDry ? "Dry-run quote from 1Click: real prices, no deposit address." : "Live quote: the deposit address is yours for this swap only."}
-            </p>
-          </div>
-          <button type="button" onClick={onRestart} className="btn-tactile shrink-0 px-3 py-1.5 text-sm font-medium">
-            New quote
-          </button>
-        </div>
+  const onPaid = (hash: string) => {
+    const at = Date.now();
+    setPaidAt(at);
+    updateFlow(quote.flowId, { paidAt: at, addTx: { chain: asset.chain, hash, label: "Deposit" } });
+    void submitDepositTx({ txHash: hash, depositAddress: res.quote.depositAddress!, memo: res.quote.depositMemo });
+  };
+  const simulate = (outcome: SimOutcome) => {
+    setSim({ outcome, step: 0, startedAt: Date.now() });
+    setStake("none");
+    setStage("track");
+  };
 
-        <Rows>
-          <Row label="You send">
-            {formatUnits(BigInt(res.quote.amountIn), asset.decimals)} {asset.symbol}
-            {res.quote.amountInUsd && <span className="block text-xs text-muted">≈ {money(Number(res.quote.amountInUsd))} on {asset.chainLabel}</span>}
-          </Row>
-          <Row label={instant ? "stNEAR delivered" : "NEAR delivered"} hint="to your NEAR account">
-            ≈ {formatUnits(out, outDecimals, 5)} {instant ? "stNEAR" : "NEAR"}
-            <span className="block text-xs text-muted">at least {formatUnits(BigInt(res.quote.minAmountOut), outDecimals, 5)}</span>
-          </Row>
-          {!instant && (
-            <Row label="Then staked" hint="one signature after delivery">
-              exactly what arrives, minus gas if the account is new
-              <span className="block text-xs text-muted">into {targetLabel(target)} · about 0.05 NEAR stays so you can unstake later</span>
-            </Row>
-          )}
-          <Row label="Fees">
-            1Click {(appFee / 100).toFixed(2)} %{res.quote.withdrawFee && res.quote.withdrawFee !== "0" ? ` · delivery ${formatNear(BigInt(res.quote.withdrawFee), 5)}` : ""}
-            {refundFee !== null && (
-              <span className="block text-xs text-muted">
-                a refund would cost {formatUnits(refundFee, asset.decimals)} {asset.symbol}
-              </span>
-            )}
-          </Row>
-          <Row label="Time">
-            ~{duration(res.quote.timeEstimate * 1000)} after your deposit confirms
-            <span className="block text-xs text-muted">{instant ? "no unbonding to stake" : target.kind === "native" ? "unstaking later: ~21–28 h" : "unstaking later: 4–5+ epochs (≈ 21–35 h+)"}</span>
-          </Row>
-          <Row label="Quote check">
-            <span className="text-accent">✓ echo matches what you approved</span>
-            <span className="block text-xs text-muted">recipient {shortAccount(quote.req.recipient)} · refund {shortAccount(quote.req.refundTo)} · {quote.req.destinationAsset} · {quote.req.recipientType}</span>
-            <span className="block text-xs text-muted">signed quote saved in Recent activity</span>
-          </Row>
-        </Rows>
+  // ── what the card shows ──
+  const tv = targetView(target, data, recipient);
+  const reported = reportedDelivery(status);
+  const kept = useKept(target, recipient, isDry, demo, reported);
+  const amountIn = BigInt(res.quote.amountIn);
+  const amountInText = `${formatUnits(amountIn, asset.decimals)} ${asset.symbol}`;
+  const arrived = reported ?? out;
+  const stakedEst = !instant && kept.data !== undefined ? stakedFromDelivery(arrived, kept.data) : null;
+  const stakedFinal = record?.staked ? BigInt(record.staked) : null;
+  const stakedShown = stakedFinal ?? stakedEst;
+  const outUsd = res.quote.amountOutUsd ? Number(res.quote.amountOutUsd) : null;
+  const usdPerNear = outUsd !== null && out > 0n ? outUsd / (bigintToNumber(out / 10n ** 16n) / 1e8) : null;
+  const feeUsd = res.quote.amountInUsd ? (Number(res.quote.amountInUsd) * appFee) / 10_000 : null;
+  const feeText = feeUsd === null ? `${(appFee / 100).toFixed(2)}%` : feeUsd < 0.01 ? "< $0.01" : money(feeUsd);
+  const eta = duration(res.quote.timeEstimate * 1000);
+  const walletName = near?.walletName ?? "your NEAR wallet";
+  const unlock = unlockFacts(target, epoch, now);
+  const unit = instant ? "stNEAR" : "NEAR";
 
-        {stage === "review" && (
-          <>
-            <ExchangeWarnings asset={asset} memo={res.quote.depositMemo ?? null} />
-            {isDry ? (
-              <div className="flex flex-col gap-3">
-                <p className="text-sm text-muted">Replay what happens next with statuses shaped like real 1Click answers (marked simulated):</p>
-                <div className="flex flex-wrap gap-2">
-                  {SIM_OUTCOMES.map((o) => (
-                    <button
-                      key={o.id}
-                      type="button"
-                      onClick={() => {
-                        setSim({ outcome: o.id, step: 0, startedAt: Date.now() });
-                        setStake("none");
-                        setStage("track");
-                      }}
-                      className={o.id === "success" ? "btn-tactile-accent px-4 py-2.5 text-sm" : "btn-tactile px-4 py-2.5 text-sm font-medium"}
-                    >
-                      {o.id === "success" ? "Simulate: delivered" : o.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <button type="button" onClick={() => setStage("track")} className="btn-tactile-accent btn-tactile-lg justify-center px-6 py-3.5 text-base">
-                Continue to deposit
+  // ── timed steps: what this page saw happen, from the payment (or the first sight of the deposit) ──
+  const legs = Object.fromEntries(view.legs.map((l) => [l.id, l])) as Record<string, (typeof view.legs)[number]>;
+  const delivered = phase === "delivered";
+  const finished = instant ? delivered : stake === "done";
+  const states: Record<"source" | "intents" | "near" | "pool", StepState> = {
+    source: legs.source!.state,
+    intents: legs.intents!.state,
+    near: delivered ? "done" : legs.near!.state,
+    // delivered and not staked: the signature is the user's turn; a failed try leaves the NEAR on the account
+    pool: stake === "done" ? "done" : delivered ? (stake === "signing" ? "active" : "waiting") : (legs.pool?.state ?? "todo"),
+  };
+  const key = Object.values(states).join(",");
+  const [seen, setSeen] = useState<{ key: string; at: Partial<Record<keyof typeof states, number>> }>({ key: "", at: {} });
+  if (seen.key !== key) {
+    // steps already done when the page opened get no time (a reopened flow): only transitions seen here
+    const at = { ...seen.at };
+    if (seen.key) for (const id of Object.keys(states) as (keyof typeof states)[]) if (states[id] === "done" && at[id] === undefined) at[id] = now;
+    setSeen({ key, at });
+  }
+  const startedAt = sim ? sim.startedAt : (paidAt ?? seen.at.source ?? null);
+  const stepTime = (id: keyof typeof states) => {
+    const t = seen.at[id];
+    return t !== undefined && startedAt !== null && t > startedAt ? mss(t - startedAt) : null;
+  };
+  const endAt = instant ? seen.at.near : seen.at.pool;
+  const elapsed =
+    startedAt === null
+      ? `Usually about ${eta} after the deposit confirms`
+      : endAt !== undefined
+        ? `Took ${mss(endAt - startedAt)}`
+        : delivered && seen.at.near !== undefined
+          ? `NEAR arrived in ${mss(seen.at.near - startedAt)}`
+          : isTerminal(phase)
+            ? null
+            : `${mss(now - startedAt)} elapsed · usually about ${eta}`;
+
+  if (stage === "review")
+    return (
+      <>
+        <StakeIntro />
+        <CardShell id="stake-title" title="Stake NEAR" right={<ModeDot live={!isDry}>{isDry ? "Dry-run quote" : "Live quote"}</ModeDot>}>
+          <Box className="mt-4">
+            <div className="flex min-h-5 items-center justify-between gap-4 text-[13px] leading-5 text-muted">
+              <span>You pay</span>
+              {payer && payer.family === asset.family && (
+                <span className="truncate">
+                  from <span className="font-mono text-text">{shortAccount(payer.address)}</span>
+                </span>
+              )}
+            </div>
+            <div className="mt-2 flex items-center gap-3">
+              <span className="min-w-0 flex-1 truncate text-[32px] font-semibold leading-[48px] tracking-[-0.02em] tabular-nums sm:text-[40px]">{formatUnits(amountIn, asset.decimals)}</span>
+              <PayWithButton asset={asset} />
+            </div>
+            {res.quote.amountInUsd && <div className="mt-1 text-sm text-muted">≈ {money(Number(res.quote.amountInUsd))}</div>}
+          </Box>
+          <Connector />
+          <Box>
+            <div className="text-[13px] leading-5 text-muted">{instant ? "You get, straight from 1Click" : "You stake into"}</div>
+            <TargetRow avatar={tv.avatar} title={tv.name} meta={tv.meta} badge={tv.badge} />
+          </Box>
+          <YouGet
+            where={target.kind === "native" ? `Staked in ${tv.short}` : `${tv.short} on your account`}
+            big={
+              instant
+                ? `≈ ${nearAmount(out)} stNEAR`
+                : stakedEst === null
+                  ? <Skeleton className="h-10 w-40" />
+                  : target.kind === "liquid" && tv.price
+                    ? `≈ ${nearAmount(sharesFor(stakedEst, tv.price))} ${tv.short}`
+                    : `≈ ${nearAmount(stakedEst)} NEAR`
+            }
+            usd={instant ? outUsd : stakedEst !== null && usdPerNear !== null ? usdOf(stakedEst, usdPerNear) : null}
+            earns={earnsText(target, stakedEst, tv.apr)}
+            unlock={unlock}
+            hint={instant ? "From the quote: the stNEAR 1Click delivers." : "From the quote. What is staked is exactly what arrives, minus the gas reserve kept on your account."}
+          />
+          <Disclosure className="mt-4" summary="Details" hint={`Fee ${feeText} · about ${eta}`}>
+            <dl className="text-[13px] leading-5">
+              <DetailRow label="Swap fee (NEAR Intents)">
+                {feeText} <span className="text-muted">({(appFee / 100).toFixed(2)}%)</span>
+                {res.quote.withdrawFee && res.quote.withdrawFee !== "0" ? ` · delivery ${formatNear(BigInt(res.quote.withdrawFee), 5)}` : ""}
+              </DetailRow>
+              <DetailRow label="Arrives in">about {eta} after your deposit confirms</DetailRow>
+              <DetailRow label={`${unit} goes to`}>
+                <span className="font-mono">{shortAccount(quote.req.recipient)}</span> · ≈ {nearAmount(out)} {unit}
+                <span className="block text-muted">
+                  at least {formatUnits(BigInt(res.quote.minAmountOut), outDecimals, 5)} {unit}
+                </span>
+              </DetailRow>
+              {!instant && (
+                <DetailRow label="Kept on your account" hint={<InfoHint label="Why some NEAR stays on your account">{KEPT_HINT}</InfoHint>}>
+                  {keptText(kept.data)}
+                </DetailRow>
+              )}
+              <DetailRow label="If anything fails">
+                Refund to <span className="font-mono">{shortAccount(quote.req.refundTo)}</span> on {asset.chainLabel}
+                {refundFee !== null && (
+                  <span className="block text-muted">
+                    a refund costs {formatUnits(refundFee, asset.decimals)} {asset.symbol}
+                  </span>
+                )}
+              </DetailRow>
+              {tv.fee && <DetailRow label={tv.fee.label}>{tv.fee.text}</DetailRow>}
+              <DetailRow
+                label="Quote check"
+                hint={
+                  <InfoHint label="What the quote check covers">
+                    {`1Click's answer repeats what this app asked for: recipient ${shortAccount(quote.req.recipient)}, refund ${shortAccount(quote.req.refundTo)}, ${quote.req.destinationAsset}, ${quote.req.recipientType}. The signed quote is saved in Recent activity.`}
+                  </InfoHint>
+                }
+              >
+                <span className="text-accent">Matches what you asked for</span>
+              </DetailRow>
+            </dl>
+          </Disclosure>
+
+          {isDry ? (
+            <div className="mt-4 flex flex-col gap-2">
+              <button type="button" onClick={() => simulate("success")} className={CTA}>
+                Simulate: delivered
               </button>
-            )}
-          </>
-        )}
-
-        {stage === "track" && (
-          <>
-            {sim && <Pill tone="warn" className="self-start">Simulated statuses · dry run</Pill>}
-            <FundsRoute
-              view={view}
-              icons={{
-                source: <img src={asset.icon} alt="" className="size-9 rounded-full" />,
-                intents: <IntentsGlyph />,
-                near: <img src={NEAR_ICON} alt="" className="size-9 rounded-full" />,
-                pool: <LogoMark size={22} arc={false} />,
-              }}
-              extra={{
-                source: (
-                  <>
-                    {depositTxHashes(status).map((h) => (
-                      <TxLink key={h} chain={asset.chain} hash={h} className="text-xs" />
-                    ))}
-                  </>
-                ),
-                near: deliveryTxHash(status) ? <TxLink chain="near:mainnet" hash={deliveryTxHash(status)!} className="text-xs" /> : null,
-              }}
-            />
-            {!isDry && phase === "awaiting-deposit" && !paidAt && (
-              <DepositPanel
-                quote={res}
-                dryRun={dryRun}
-                asset={asset}
-                payer={payer && payer.family === asset.family ? payer : null}
-                connecting={connectingPayer}
-                onConnectPayer={onConnectPayer}
-                cutoffMs={cutoff}
-                onPaid={(hash) => {
-                  const at = Date.now();
-                  setPaidAt(at);
-                  updateFlow(quote.flowId, { paidAt: at, addTx: { chain: asset.chain, hash, label: "Deposit" } });
-                  void submitDepositTx({ txHash: hash, depositAddress: res.quote.depositAddress!, memo: res.quote.depositMemo });
-                }}
-              />
-            )}
-            {!isDry && phase === "awaiting-deposit" && paidAt && (
-              <Banner tone="accent" title="Payment sent: waiting for 1Click to see it">
-                Your wallet sent the deposit {ago(paidAt)}. Don&apos;t pay again: the status above moves on once 1Click indexes it (a few minutes on slow chains).
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPaidAt(null);
-                    updateFlow(quote.flowId, { paidAt: null });
+              <div className="flex flex-wrap items-center justify-center text-[13px] text-muted">
+                <span className="mr-1">Or replay:</span>
+                {SIM_OUTCOMES.filter((o) => o.id !== "success").map((o) => (
+                  <button key={o.id} type="button" onClick={() => simulate(o.id)} className="min-h-11 rounded-lg px-1.5 font-medium underline-offset-4 hover:text-text hover:underline">
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-center text-[13px] leading-5 text-muted">Dry run: no deposit address, nothing to pay. The replay uses statuses shaped like real 1Click answers, marked simulated.</p>
+            </div>
+          ) : (
+            <div className="mt-4 flex flex-col gap-2">
+              {asset.family && !(manual && !payer) ? (
+                <DepositPanel
+                  variant="cta"
+                  quote={res}
+                  dryRun={dryRun}
+                  asset={asset}
+                  payer={payer && payer.family === asset.family ? payer : null}
+                  connecting={connectingPayer}
+                  onConnectPayer={onConnectPayer}
+                  cutoffMs={cutoff}
+                  onPaid={(hash) => {
+                    onPaid(hash);
+                    setStage("track");
                   }}
-                  className="mt-2 block text-xs text-muted underline"
-                >
-                  The payment failed in my wallet: show the deposit again
+                />
+              ) : (
+                <button type="button" onClick={() => setStage("track")} className={CTA}>
+                  Show the deposit address
                 </button>
-              </Banner>
-            )}
-            {phase === "unknown" && (
-              <Banner tone="warn" title={status ? `1Click says ${status.status}` : "Checking the swap status"}>
-                {status
-                  ? "This app doesn't know that status, so nothing is offered to pay or stake. The signed quote is in Recent activity (Portfolio); 1Click support can look it up by the deposit address."
-                  : "Asking 1Click where this swap is. Nothing can be paid or staked until it answers."}
-              </Banner>
-            )}
-            {phase === "incomplete-deposit" && <TopUp res={res} status={status} asset={asset} refundTo={quote.req.refundTo} left={left} />}
-            {phase === "refunded" && (
-              <Banner tone="danger" title="Refunded">
-                {status?.swapDetails.refundedAmount
-                  ? `${formatUnits(BigInt(status.swapDetails.refundedAmount), asset.decimals)} ${asset.symbol} went back to ${shortAccount(quote.req.refundTo)}${status.swapDetails.refundReason ? ` (${status.swapDetails.refundReason})` : ""}.`
-                  : `The deposit went back to ${shortAccount(quote.req.refundTo)} on ${asset.chainLabel}, minus the refund fee.`}{" "}
-                Nothing reached NEAR, so there is nothing to unstake.
-              </Banner>
-            )}
-            {phase === "failed" && (
-              <Banner tone="danger" title="1Click reports the swap failed">
-                Check {shortAccount(quote.req.refundTo)} on {asset.chainLabel} for a refund. If nothing arrives, contact 1Click support with the deposit address{" "}
-                <span className="break-all font-mono text-xs">{res.quote.depositAddress}</span>; the signed quote is saved in Recent activity.
-              </Banner>
-            )}
-            {phase === "expired" && (
-              <Banner tone="danger" title="Deadline passed">
-                No full deposit arrived in time. Anything sent goes back to {shortAccount(quote.req.refundTo)} on {asset.chainLabel}, minus the refund fee. This page keeps asking 1Click
-                once a minute in case it saw a deposit late.
-              </Banner>
-            )}
-            {!instant && phase === "delivered" && stakeState === "done" && record?.staked && (
-              <Banner tone="accent" title="Already staked">
-                {formatNear(BigInt(record.staked))} of this delivery is staked in {targetLabel(target)}. See it in Portfolio.
-              </Banner>
-            )}
-            {!instant && phase === "delivered" && !(stakeState === "done" && record?.staked) && (
-              <StakeStep target={target} recipient={recipient} status={status} simulated={!!sim} flowId={quote.flowId} attemptedAt={record?.stakeAttemptAt ?? null} stake={stake} setStake={setStake} />
-            )}
-          </>
-        )}
-      </Panel>
-      <aside className="flex flex-col gap-3">
-        {left !== null && !isTerminal(phase) && phase !== "processing" && phase !== "unknown" && (
-          <div className="rounded-2xl border border-line bg-surface p-4">
-            <p className="text-xs text-muted">Deposit deadline</p>
-            <p className={`font-mono text-2xl tabular-nums ${left < cutoff ? "text-danger" : ""}`}>{left > 0 ? clock(left) : "passed"}</p>
-            <p className="text-xs text-muted">
-              The refund begins then: a deposit after it is refunded (minus the refund fee). Paying stops {Math.round(cutoff / 60_000)} min before it.
-              {inactiveAt !== null && inactiveAt > (deadline ?? 0) ? ` The address goes inactive later, at ${dateTime(inactiveAt)}: never send to it after that.` : ""}
-            </p>
+              )}
+              {asset.family && (
+                <div className="flex justify-center">
+                  {manual && !payer ? (
+                    onConnectPayer && (
+                      <button type="button" onClick={onConnectPayer} disabled={connectingPayer} className={QUIET}>
+                        {connectingPayer ? "Connecting…" : "Pay from a wallet instead"}
+                      </button>
+                    )
+                  ) : (
+                    <button type="button" onClick={() => setStage("track")} className={QUIET}>
+                      Or send it by hand instead
+                    </button>
+                  )}
+                </div>
+              )}
+              <p className="text-center text-[13px] leading-5 text-muted">
+                {instant ? "Next: confirm in your wallet. stNEAR arrives with no NEAR signature." : `Next: confirm in your wallet, then sign once in ${walletName} to stake.`}
+              </p>
+            </div>
+          )}
+          <div className="mt-1 flex justify-center">
+            <button type="button" onClick={onRestart} className={QUIET}>
+              Start over with a new quote
+            </button>
           </div>
-        )}
-        <Facts />
-      </aside>
-    </div>
-  );
-}
+        </CardShell>
+        <HowItWorks eta={eta} />
+      </>
+    );
 
-function ExchangeWarnings({ asset, memo }: { asset: SourceAsset; memo: string | null }) {
+  // ── the tracker (A-progress) ──
+  const depositLinks = depositTxHashes(status).map((h) => <ExplorerLink key={h} chain={asset.chain} hash={h} />);
+  const deliveryHash = deliveryTxHash(status);
+  const fromText = paidAt && payer && payer.family === asset.family ? <>From <span className="font-mono">{shortAccount(payer.address)}</span> on {asset.chainLabel}</> : <>On {asset.chainLabel}</>;
+  const showDeposit = !isDry && phase === "awaiting-deposit" && !paidAt;
+
+  const source: TrackStep =
+    phase === "unknown"
+      ? { id: "source", state: states.source, title: "Checking with 1Click", detail: "Nothing can be paid or staked until it answers." }
+      : phase === "awaiting-deposit"
+        ? isDry
+          ? { id: "source", state: states.source, title: "Dry run: nothing to send", detail: `A live run waits here for ${amountInText} on ${asset.chainLabel}.` }
+          : paidAt
+            ? {
+                id: "source",
+                state: states.source,
+                title: "Payment sent: waiting for 1Click to see it",
+                detail: `Your wallet sent the deposit ${ago(paidAt)}. Don't pay again: this moves on once 1Click indexes it (a few minutes on slow chains).`,
+                body: (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPaidAt(null);
+                      updateFlow(quote.flowId, { paidAt: null });
+                    }}
+                    className={`${QUIET} -ml-2 self-start`}
+                  >
+                    The payment failed in my wallet: show the deposit again
+                  </button>
+                ),
+              }
+            : {
+                id: "source",
+                state: states.source,
+                title: `Send ${amountInText} on ${asset.chainLabel}`,
+                detail: "Exactly this amount, once.",
+                body: (
+                  <DepositPanel
+                    quote={res}
+                    dryRun={dryRun}
+                    asset={asset}
+                    payer={payer && payer.family === asset.family ? payer : null}
+                    connecting={connectingPayer}
+                    onConnectPayer={onConnectPayer}
+                    cutoffMs={cutoff}
+                    onPaid={onPaid}
+                  />
+                ),
+              }
+        : phase === "expired" && !depositLinks.length
+          ? { id: "source", state: states.source, title: "No full deposit arrived in time", detail: "Anything sent is refunded, minus the refund fee." }
+          : {
+              id: "source",
+              state: states.source,
+              title: `We got your ${amountInText}`,
+              detail: (
+                <>
+                  {fromText}
+                  {depositLinks.length > 0 && <> · {depositLinks}</>}
+                </>
+              ),
+              time: stepTime("source"),
+            };
+
+  const intents: TrackStep = {
+    id: "intents",
+    state: states.intents,
+    title:
+      states.intents === "done"
+        ? `Swapped to ${unit}`
+        : phase === "deposit-detected"
+          ? "Confirming your deposit"
+          : phase === "processing"
+            ? `Swapping to ${unit}`
+            : phase === "incomplete-deposit"
+              ? "Less than quoted arrived"
+              : phase === "refunded"
+                ? "The swap didn't go through"
+                : phase === "failed"
+                  ? "The swap reported an error"
+                  : phase === "expired"
+                    ? "The swap didn't start"
+                    : `Swap to ${unit}`,
+    detail:
+      states.intents === "done"
+        ? `By NEAR Intents · fee ${feeText}`
+        : phase === "deposit-detected"
+          ? `Seen on ${asset.chainLabel}, waiting for confirmations`
+          : phase === "processing"
+            ? "NEAR Intents is swapping it for your account"
+            : states.intents === "todo"
+              ? `By NEAR Intents, usually about ${eta}`
+              : undefined,
+    time: stepTime("intents"),
+  };
+
+  const nearStep: TrackStep =
+    states.near === "done"
+      ? {
+          id: "near",
+          state: "done",
+          title: (
+            <>
+              Delivered {nearAmount(arrived)} {unit} to <span className="font-mono font-medium">{shortAccount(recipient)}</span>
+            </>
+          ),
+          detail: (
+            <>
+              {!instant && kept.data !== undefined && kept.data > 0n && `≈ ${nearAmount(kept.data)} NEAR stays for gas`}
+              {!instant && kept.data !== undefined && kept.data > 0n && deliveryHash && " · "}
+              {deliveryHash && <ExplorerLink chain="near:mainnet" hash={deliveryHash} />}
+            </>
+          ),
+          time: stepTime("near"),
+        }
+      : {
+          id: "near",
+          state: states.near,
+          title: (
+            <>
+              {unit} lands in <span className="font-mono font-medium">{shortAccount(recipient)}</span>
+            </>
+          ),
+          detail: `≈ ${nearAmount(out)} ${unit}`,
+        };
+
+  const steps: TrackStep[] = [source, intents, nearStep];
+  if (!instant) {
+    const already = phase === "delivered" && stakeState === "done" && !!record?.staked;
+    steps.push(
+      already
+        ? {
+            id: "pool",
+            state: "done",
+            title: `Staked ${formatNear(BigInt(record!.staked!))} in ${tv.short}`,
+            detail: (
+              <>
+                Already staked.{" "}
+                <Link href="/portfolio" className="text-accent hover:underline">
+                  See it in Portfolio
+                </Link>
+              </>
+            ),
+          }
+        : phase === "delivered"
+          ? {
+              id: "pool",
+              state: states.pool,
+              boxed: stake !== "done",
+              time: stepTime("pool"),
+              body: (
+                <StakeStep target={target} recipient={recipient} status={status} simulated={!!sim} flowId={quote.flowId} attemptedAt={record?.stakeAttemptAt ?? null} stake={stake} setStake={setStake} apr={tv.apr} />
+              ),
+            }
+          : { id: "pool", state: states.pool, title: "Sign once to stake", detail: `${cap(walletName)} asks you to confirm. It stakes exactly what arrived.` },
+    );
+  }
+  const done = steps.filter((s) => s.state === "done").length;
+  // refunded, failed or past the deadline: the steps after the one that stopped won't happen
+  const stopped = view.tone === "bad";
+  if (stopped) {
+    const at = steps.findIndex((s) => s.state === "failed");
+    if (at >= 0) steps.splice(at + 1);
+  }
+  if (!stopped) steps.push({
+    id: "earn",
+    state: finished ? "done" : "todo",
+    title: instant ? "Earning with Meta Pool" : tv.apr !== null ? `Earning ${percent(tv.apr)} a year` : "Earning a yearly reward",
+    detail:
+      target.kind === "native"
+        ? epoch
+          ? `Rewards start with the next epoch, in about ${duration(Math.max(0, epoch.endsAt - now))}`
+          : "Rewards start with the next epoch"
+        : `${tv.short} grows in NEAR value every epoch`,
+  });
+
+  const badge: { label: string; tone: StatusTone; pulse?: boolean } =
+    phase === "unknown"
+      ? { label: "Checking", tone: "neutral" }
+      : phase === "awaiting-deposit"
+        ? isDry
+          ? { label: "Dry run", tone: "neutral" }
+          : paidAt
+            ? { label: "Waiting for 1Click", tone: "progress", pulse: true }
+            : { label: "Your turn", tone: "attention" }
+        : phase === "deposit-detected" || phase === "processing"
+          ? { label: "In progress", tone: "progress", pulse: true }
+          : phase === "incomplete-deposit"
+            ? { label: "Less arrived", tone: "attention" }
+            : phase === "delivered"
+              ? finished
+                ? { label: "Done", tone: "success" }
+                : { label: "Your turn", tone: "attention" }
+              : phase === "refunded"
+                ? { label: "Refunded", tone: "danger" }
+                : phase === "failed"
+                  ? { label: "Failed", tone: "danger" }
+                  : { label: "Deadline passed", tone: "danger" };
+
+  const routeNodes: RouteNode[] = [
+    { id: "source", icon: <TokenIcon asset={asset} ring="ring-surface" />, title: `${asset.symbol} on ${asset.chainLabel}`, caption: amountInText, state: states.source },
+    {
+      id: "intents",
+      icon: (
+        <span className="grid size-8 place-items-center rounded-full border border-line bg-panel">
+          <IntentsGlyph />
+        </span>
+      ),
+      title: "NEAR Intents",
+      caption: "swap",
+      state: states.intents,
+    },
+    {
+      id: "near",
+      icon: (
+        <span className="grid size-8 place-items-center rounded-full bg-accent">
+          <svg viewBox="0 0 512 512" aria-hidden className="size-4">
+            <path d={NEAR_N_PATH} fill="var(--accent-ink)" />
+          </svg>
+        </span>
+      ),
+      title: shortAccount(recipient),
+      caption: `${reported !== null ? "" : "≈ "}${nearAmount(arrived)} ${unit}`,
+      state: states.near,
+      mono: true,
+    },
+  ];
+  if (!instant)
+    routeNodes.push({
+      id: "pool",
+      icon: <PoolAvatar name={tv.short} tone={target.kind === "liquid" ? "liquid" : "pool"} size={32} />,
+      title: tv.short,
+      caption: stakedShown !== null ? `${stakedFinal !== null ? "" : "≈ "}${nearAmount(stakedShown)} NEAR` : "stake",
+      state: states.pool,
+    });
+
+  const showDeadline = left !== null && !isTerminal(phase) && phase !== "processing" && phase !== "unknown" && !showDeposit;
+  const safeToClose = !isDry && ((!isTerminal(phase) && phase !== "unknown" && phase !== "incomplete-deposit" && (phase !== "awaiting-deposit" || !!paidAt)) || (delivered && !finished));
+
   return (
-    <details className="rounded-2xl border border-warn/40 bg-warn/10 px-4 py-3 text-sm">
-      <summary className="cursor-pointer font-medium text-warn">Sending from an exchange?</summary>
-      <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 text-muted">
-        <li>The refund address must be your own wallet: a refund sent to an exchange deposit address can be lost.</li>
-        <li>Exchanges often subtract their withdrawal fee. Less than the quoted amount arrives and the swap waits for a top-up (INCOMPLETE_DEPOSIT) or is refunded at the deadline.</li>
-        {(memo || MEMO_CHAINS.has(asset.chain)) && <li>{asset.chainLabel} deposits may need a memo, and many exchanges can&apos;t add one.</li>}
-        {KNOWN_MINIMUM_USD[asset.chain] && <li>{asset.chainLabel} currently has a ${KNOWN_MINIMUM_USD[asset.chain]} minimum per swap.</li>}
-        <li>Refunds cost the refund fee shown above.</li>
-      </ul>
-    </details>
+    <CardShell
+      id="track-title"
+      heading="h1"
+      wide
+      title={instant ? `Getting stNEAR for ${amountInText}` : `Staking ${amountInText}`}
+      sub={
+        <>
+          {instant
+            ? `≈ ${nearAmount(out)} stNEAR to ${shortAccount(recipient)}`
+            : `${stakedFinal !== null ? "" : "≈ "}${nearAmount(stakedShown ?? out)} NEAR into ${tv.short}${tv.apr !== null ? ` · ${percent(tv.apr)} APR` : ""}`}
+          {sim && <span className="block text-[13px] text-warn">Simulated statuses · dry run, nothing is sent</span>}
+        </>
+      }
+      right={
+        <StatusBadge tone={badge.tone} pulse={badge.pulse}>
+          {badge.label}
+        </StatusBadge>
+      }
+    >
+      <div className="mt-6">
+        <RouteStrip
+          nodes={routeNodes}
+          label={`Route: ${asset.symbol} on ${asset.chainLabel}, then NEAR Intents, then ${shortAccount(recipient)}${instant ? "" : `, then ${tv.short}`}`}
+        />
+      </div>
+      <p role="status" className="sr-only">
+        {view.headline}
+      </p>
+
+      <div className="mt-6">
+        <div className="flex flex-wrap justify-between gap-x-4 gap-y-1 text-[13px] leading-5">
+          <span className="font-medium">
+            {stopped ? `Stopped after ${done} of ${instant ? 3 : 4} steps` : `${done} of ${instant ? 3 : 4} steps done`}
+          </span>
+          {elapsed && <span className="text-muted">{elapsed}</span>}
+        </div>
+        <div
+          role="progressbar"
+          aria-label="Stake progress"
+          aria-valuemin={0}
+          aria-valuemax={instant ? 3 : 4}
+          aria-valuenow={done}
+          aria-valuetext={`${done} of ${instant ? 3 : 4} steps done`}
+          className="mt-2 h-2 overflow-hidden rounded-full bg-surface-2"
+        >
+          <div
+            className={`h-full rounded-full transition-[width] duration-500 ${view.tone === "bad" ? "bg-danger" : "bg-accent"}`}
+            style={{ width: `${(done / (instant ? 3 : 4)) * 100}%` }}
+          />
+        </div>
+        {showDeadline && left !== null && (
+          <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[13px] leading-5 text-muted">
+            Refund deadline
+            <span className={`font-mono tabular-nums ${left < cutoff ? "text-danger" : "text-text"}`}>{left > 0 ? clock(left) : "passed"}</span>
+            <InfoHint label="About the deadline">
+              {`The refund begins then: a deposit after it is refunded (minus the refund fee). Paying stops ${Math.round(cutoff / 60_000)} min before it.${inactiveAt !== null && inactiveAt > (deadline ?? 0) ? ` The address goes inactive later, at ${dateTime(inactiveAt)}: never send to it after that.` : ""}`}
+            </InfoHint>
+          </p>
+        )}
+      </div>
+
+      <div className="mt-6 flex flex-col gap-3 empty:hidden">
+        {phase === "unknown" && (
+          <Notice tone="attention" title={status ? `1Click says ${status.status}` : "Checking the swap status"}>
+            {status
+              ? "This app doesn't know that status, so nothing is offered to pay or stake. The signed quote is in Recent activity (Portfolio); 1Click support can look it up by the deposit address."
+              : "Asking 1Click where this swap is. Nothing can be paid or staked until it answers."}
+          </Notice>
+        )}
+        {phase === "incomplete-deposit" && <TopUp res={res} status={status} asset={asset} refundTo={quote.req.refundTo} left={left} />}
+        {phase === "refunded" && (
+          <Notice tone="danger" title="Refunded">
+            {status?.swapDetails.refundedAmount
+              ? `${formatUnits(BigInt(status.swapDetails.refundedAmount), asset.decimals)} ${asset.symbol} went back to ${shortAccount(quote.req.refundTo)}${status.swapDetails.refundReason ? ` (${status.swapDetails.refundReason})` : ""}.`
+              : `The deposit went back to ${shortAccount(quote.req.refundTo)} on ${asset.chainLabel}, minus the refund fee.`}{" "}
+            Nothing reached NEAR, so there is nothing to unstake.
+          </Notice>
+        )}
+        {phase === "failed" && (
+          <Notice tone="danger" title="1Click reports the swap failed">
+            Check {shortAccount(quote.req.refundTo)} on {asset.chainLabel} for a refund. If nothing arrives, contact 1Click support with the deposit address{" "}
+            <span className="break-all font-mono text-xs">{res.quote.depositAddress}</span>; the signed quote is saved in Recent activity.
+          </Notice>
+        )}
+        {phase === "expired" && (
+          <Notice tone="danger" title="Deadline passed">
+            No full deposit arrived in time. Anything sent goes back to {shortAccount(quote.req.refundTo)} on {asset.chainLabel}, minus the refund fee. This page keeps asking 1Click
+            once a minute in case it saw a deposit late.
+          </Notice>
+        )}
+      </div>
+
+      <div className="mt-6">
+        <StepList steps={steps} />
+      </div>
+
+      {safeToClose && (
+        <Notice
+          className="mt-6"
+          icon={<ShieldCheckIcon size={16} />}
+          tone="neutral"
+        >
+          <span className="font-semibold text-text">{delivered ? "Safe to close." : "Safe to close: this keeps going."}</span>{" "}
+          {delivered
+            ? `Your NEAR waits in ${shortAccount(recipient)} until you sign.`
+            : `${unit} lands in ${shortAccount(recipient)}${instant ? "" : " and waits there until you sign"}.`}{" "}
+          Come back any time from{" "}
+          <Link href="/portfolio#activity" className="text-accent hover:underline">
+            Portfolio
+          </Link>
+          .
+        </Notice>
+      )}
+
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
+        <button type="button" onClick={onRestart} className={`${QUIET} -ml-2`}>
+          Start a new stake
+        </button>
+        <Link href="/portfolio" className={`${QUIET} -mr-2`}>
+          Go to Portfolio
+        </Link>
+      </div>
+    </CardShell>
   );
 }
 
@@ -744,11 +1426,11 @@ function ExchangeWarnings({ asset, memo }: { asset: SourceAsset; memo: string | 
 function TopUp({ res, status, asset, refundTo, left }: { res: QuoteResponse; status: StatusResponse | null; asset: SourceAsset; refundTo: string; left: number | null }) {
   const got = status?.swapDetails.depositedAmount ? BigInt(status.swapDetails.depositedAmount) : 0n;
   return (
-    <Banner tone="warn" title="Less than quoted arrived">
+    <Notice tone="attention" title="Less than quoted arrived">
       {formatUnits(got, asset.decimals)} {asset.symbol} arrived of {formatUnits(BigInt(res.quote.amountIn), asset.decimals)} (an exchange may have taken its fee). 1Click refunds it to{" "}
       {shortAccount(refundTo)} at the deadline{left !== null && left > 0 ? `, in ${clock(left)}` : ""}, minus the refund fee. Then start a new quote and send the exact amount from a
       wallet.
-    </Banner>
+    </Notice>
   );
 }
 
@@ -771,6 +1453,7 @@ function StakeStep({
   attemptedAt,
   stake,
   setStake,
+  apr,
 }: {
   target: Target;
   recipient: string;
@@ -781,6 +1464,8 @@ function StakeStep({
   attemptedAt: number | null;
   stake: "none" | "ready" | "signing" | "done" | "failed";
   setStake: (s: "none" | "ready" | "signing" | "done" | "failed") => void;
+  /** The target's APR as the card shows it, until the preflight reads it fresh. */
+  apr: number | null;
 }) {
   const { near, demo } = useApp();
   const signing = !!near && near.accountId === recipient && !simulated;
@@ -895,68 +1580,114 @@ function StakeStep({
     }
   };
 
+  const short = targetShort(target);
   if (stake === "done")
     return (
-      <Banner tone="accent" title="Staked">
-        {formatNear(staked ?? amount?.amount ?? 0n)} is staked in {targetLabel(target)}. {hash && <TxLink chain="near:mainnet" hash={hash} />} See it in Portfolio.
-      </Banner>
+      <div className="min-w-0">
+        <p className="text-[15px] font-semibold leading-6">
+          <span className="sr-only">Done: </span>Staked {formatNear(staked ?? amount?.amount ?? 0n)} in {short}
+        </p>
+        <p className="text-[13px] leading-5 text-muted">
+          {hash && (
+            <>
+              <ExplorerLink chain="near:mainnet" hash={hash} /> ·{" "}
+            </>
+          )}
+          <Link href="/portfolio" className="text-accent hover:underline">
+            See it in Portfolio
+          </Link>
+        </p>
+      </div>
     );
 
   const blocked = unconfirmed !== null && !checkedNotStaked;
+  const walletName = near?.walletName ?? "your NEAR wallet";
+  const shownApr = preflight?.apr ?? apr;
+  const willStake = amount && !amount.tooSmall ? formatNear(amount.amount, 4) : null;
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-accent/40 bg-accent/5 p-4">
-      <p className="font-medium">Stake what arrived</p>
+    <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
+      <div>
+        <p className="text-base font-semibold leading-6">
+          <span className="sr-only">Your turn: </span>NEAR arrived — sign to stake {willStake ?? "it"}
+        </p>
+        <p className="mt-1 text-sm leading-5 text-muted">
+          {signing ? `${cap(walletName)} opens and asks you to confirm. ` : ""}It stakes into {short}
+          {shownApr !== null ? ` at ${percent(shownApr)} APR` : ""}.
+        </p>
+      </div>
       {amount ? (
-        <Rows>
-          <Row label="Delivered" hint={amount.basis === "on-chain" ? "read from the NEAR transaction" : "as 1Click reports it"}>
+        <dl className="border-y border-line py-1.5 text-[13px] leading-5">
+          <DetailRow label="Delivered" hint={<InfoHint label="Where this figure comes from">{amount.basis === "on-chain" ? "Read from the NEAR transaction." : "As 1Click reports it."}</InfoHint>}>
             {reportedDelivery(status) !== null ? formatNear(reportedDelivery(status)!, 5) : "—"}
-            {amount.mismatch && <span className="block text-xs text-warn">the NEAR transaction and 1Click differ: the lower figure is staked</span>}
-          </Row>
-          <Row label="Will stake" hint={amount.capped ? "capped by what the account can spend" : "exactly the delivery"}>
+            {amount.mismatch && <span className="block text-warn">the NEAR transaction and 1Click differ: the lower figure is staked</span>}
+          </DetailRow>
+          <DetailRow label="Will stake">
             <span className="font-semibold text-accent">{amount.tooSmall ? "too small to stake" : formatNear(amount.amount, 5)}</span>
-          </Row>
-        </Rows>
+            <span className="block text-muted">{amount.capped ? "capped by what the account can spend" : "exactly the delivery"}</span>
+          </DetailRow>
+        </dl>
       ) : amountErr ? (
         <p className="text-sm text-danger">{amountErr}</p>
       ) : (
         <Spinner />
       )}
-      {preflight && (
-        <>
-          <TxPreview transactions={preflight.transactions} />
-          <p className="text-xs text-muted">
-            Network fee at most {formatNear(preflight.fee, 5)} · {formatNear(preflight.upfront, 4)} held back for gas while it runs (refunded) · {formatNear(preflight.reserve, 4)} stays
-            on the account for the unstake{preflight.apr !== null ? ` · APR ${percent(preflight.apr)}` : ""}
-          </p>
-          {preflight.warnings.map((w) => (
-            <p key={w.code} className="text-sm text-warn">
-              {w.message}
-            </p>
-          ))}
-        </>
-      )}
+      {preflight?.warnings.map((w) => (
+        <p key={w.code} className="text-sm text-warn">
+          {w.message}
+        </p>
+      ))}
       {unconfirmed !== null && (
-        <Banner tone="warn" title="A stake may already have gone through">
+        <Notice tone="attention" title="A stake may already have gone through">
           A stake for this delivery was signed {ago(unconfirmed)} and its result wasn&apos;t confirmed. Check Portfolio first: signing again would stake other NEAR on the account.
-          <label className="mt-2 flex items-start gap-2 text-sm">
-            <input type="checkbox" checked={checkedNotStaked} onChange={(e) => setCheckedNotStaked(e.target.checked)} className="mt-1 accent-[var(--accent)]" />
+          <label className="mt-2 flex min-h-11 items-start gap-2.5 text-sm">
+            <input type="checkbox" checked={checkedNotStaked} onChange={(e) => setCheckedNotStaked(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-[var(--accent)]" />
             <span>I checked Portfolio: this delivery is not staked.</span>
           </label>
-        </Banner>
+        </Notice>
       )}
-      {err && <Banner tone={simulated ? "warn" : "danger"} title={simulated ? "Preflight on the demo account" : stake === "signing" ? "Wallet error" : "Preflight refused"}>{err}{simulated ? " In a live run the delivery itself funds the stake." : ""}</Banner>}
-      <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={() => void runPreflight()} disabled={busy || stake === "signing"} className="btn-tactile px-4 py-2.5 text-sm font-medium">
-          {busy ? "Checking…" : "Preflight again"}
-        </button>
-        <button type="button" onClick={() => void sign()} disabled={!signing || !preflight || stake === "signing" || busy || blocked} className="btn-tactile-accent px-4 py-2.5 text-sm" title={signing ? undefined : "Dry run / demo account: nothing to sign"}>
-          {stake === "signing" ? "Confirm in your wallet…" : "Sign and stake"}
+      {err && (
+        <Notice tone={simulated ? "attention" : "danger"} title={simulated ? "Preflight on the demo account" : stake === "signing" ? "Wallet error" : "Preflight refused"}>
+          {err}
+          {simulated ? " In a live run the delivery itself funds the stake." : ""}
+        </Notice>
+      )}
+      <button
+        type="button"
+        onClick={() => void sign()}
+        disabled={!signing || !preflight || stake === "signing" || busy || blocked}
+        className={CTA}
+        title={signing ? undefined : "Dry run / demo account: nothing to sign"}
+      >
+        {stake === "signing" ? "Confirm in your wallet…" : signing ? `Sign and stake${willStake ? ` ${willStake}` : ""} in ${walletName}` : "Sign and stake"}
+      </button>
+      {!signing && (
+        <p className="text-[13px] leading-5 text-muted">
+          {simulated
+            ? "Dry run: nothing to sign. In a live run your NEAR wallet asks you to confirm here."
+            : near
+              ? `This stake is for ${shortAccount(recipient)}: connect that account to sign.`
+              : `Connect the NEAR wallet for ${shortAccount(recipient)} to sign.`}
+        </p>
+      )}
+      {/* "Check again" sits beside the toggle; the opened preview takes the box's full width under both */}
+      <div className="relative min-h-11">
+        {preflight && (
+          <Disclosure variant="plain" summary="What you'll sign" className="pr-28" bodyClassName="-mr-28 flex flex-col gap-2 pb-1">
+            <TxPreview transactions={preflight.transactions} title="The transaction, as the staking module built it" />
+            <p className="text-xs leading-4 text-muted">
+              Network fee at most {formatNear(preflight.fee, 5)} · {formatNear(preflight.upfront, 4)} held back for gas while it runs (refunded) · {formatNear(preflight.reserve, 4)}{" "}
+              stays on the account for the unstake{preflight.apr !== null ? ` · APR ${percent(preflight.apr)}` : ""}
+            </p>
+            <p className="text-xs leading-4 text-muted">
+              The check reads the delivered amount, pool code, pause, fee, validator set and balances fresh. NEAR has no transaction simulation, so nothing runs until you sign; the
+              signed transaction must equal this preview.
+            </p>
+          </Disclosure>
+        )}
+        <button type="button" onClick={() => void runPreflight()} disabled={busy || stake === "signing"} className={`${QUIET} absolute -right-2 top-0`}>
+          {busy ? "Checking…" : "Check again"}
         </button>
       </div>
-      <p className="text-xs text-muted">
-        Preflight runs the module&apos;s quote: the delivered amount, pool code, pause, fee, validator set and balances are read fresh, and the exact transaction is shown. NEAR has no
-        transaction simulation, so nothing is executed until you sign; the signed transaction must equal this preview.
-      </p>
     </div>
   );
 }

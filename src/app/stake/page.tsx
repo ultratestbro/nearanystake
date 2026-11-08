@@ -1,17 +1,15 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
+import { StakeFallback } from "@/components/StakeCard";
 import { StakeFlow } from "@/components/StakeFlow";
 
 export const metadata: Metadata = { title: "Stake · NearAnyStake" };
 
 export default function StakePage() {
   return (
-    <div className="flex flex-col gap-5">
-      <div>
-        <h1 className="text-2xl font-semibold sm:text-3xl">Stake NEAR from any chain</h1>
-        <p className="text-muted">Pick where to stake, pay from any chain, sign once when the NEAR arrives.</p>
-      </div>
-      <Suspense>
+    <div className="pb-4 pt-2 sm:pt-6">
+      {/* the flow reads the URL (?flow=, ?pool=), so it renders in the browser; the fallback is what the server sends */}
+      <Suspense fallback={<StakeFallback />}>
         <StakeFlow />
       </Suspense>
     </div>
