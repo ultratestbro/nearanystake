@@ -107,7 +107,7 @@ export interface OutboundQuoteInput {
   now?: number;
 }
 
-/** NEAR → any chain ("Withdraw to any chain" after an unstake). */
+/** NEAR → any chain ("Cash out to any chain" after an unstake). */
 export function buildOutboundQuoteRequest(o: OutboundQuoteInput): QuoteRequest {
   const req: QuoteRequest = {
     dry: o.dry,

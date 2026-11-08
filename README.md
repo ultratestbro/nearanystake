@@ -22,8 +22,8 @@ header): real 1Click quotes, real pools and APRs, no deposit address.
 | Press **Simulate: delivered** | The card turns into a tracker (labelled *simulated*): the route Base → NEAR Intents → your NEAR account → the pool and timed steps. Then the stake step: **Will stake = exactly what was delivered**, capped only by what the account can spend, and **What you'll sign** shows the exact `deposit_and_stake` transaction the module built (pool, gas, deposit). |
 | **Start over with a new quote** → *Or replay:* **Exchange took a fee**, **Refunded**, **Failed**, **Deadline passed** | Every failure state and what it means for your money (an incomplete deposit is refunded at the deadline; the page keeps checking after it in case 1Click saw a deposit late). |
 | Pick **rNEAR** or **LiNEAR**, or tick **Instant stNEAR** | rNEAR / LiNEAR minted after delivery (refused before quoting when the contract is paused or runs code the module has no pin for); Instant stNEAR offered only when your account exists and is registered on Meta Pool; its quote shows the stNEAR you get. |
-| **Portfolio** → *Demo: nima.near* (`/positions` redirects here) | A public delegator (on 2026-11-08: **168.9 NEAR unbonding** in `astro-stakers.poolv1.near`): the unlock window as dates and a countdown, Unstake / Withdraw with Preflight. Signing is disabled: it is not your account. |
-| **Portfolio** → *Recent activity* (`/history` redirects here) | Every quote you requested, with the whole 1Click response including its `signature` (the API asks clients to keep it for disputes), statuses and explorer links. |
+| **Portfolio** → *View a demo account* (`/positions` redirects here) | A public delegator (on 2026-11-08: **168.9 NEAR unstaked** in `astro-stakers.poolv1.near`): total staked, what is unstaking and what is ready to withdraw, the position's state (staked → unstaking with a countdown → ready → back on the account), and Withdraw / Unstake with a preview of the exact transaction. Signing is disabled: it is not your account. |
+| **Portfolio** → *Recent activity* (`/history` redirects here) | Every quote, payment, stake, unstake and withdrawal in plain words (*Done*, *In progress*, *Needs your signature*, *Refunded*, *Dry run*), each transaction as a labelled explorer link, and the whole 1Click response including its `signature` behind *Signed quote* (the API asks clients to keep it for disputes). |
 | Connect a NEAR wallet (Meteor, HERE, Intear): the header switch turns to **Live** | A payable quote with a one-time deposit address, QR, memo when needed and a countdown to when the refund begins (1 h; 3 h for Bitcoin, Zcash, Litecoin, Dogecoin and Bitcoin Cash, and paying stops 5 / 90 min before it); pay once from an EVM, Solana, TON, Tron or Bitcoin wallet, or by hand; then one signature stakes. A brand-new implicit account works: the delivery creates it. |
 
 ## How it works
@@ -52,8 +52,9 @@ your wallet on chain X ──deposit──▶ 1Click / NEAR Intents ──native
    "Sign and stake" comes back.
 4. **Exit.** Unstake (an unlocked balance is withdrawn in the same transaction so it never locks again; next to a
    balance still unbonding the module refuses unless you tick "restart the wait"), withdraw when unlocked, then
-   **Withdraw to any chain**: NEAR → 1Click → a token on another chain, refunds to your NEAR account. What is shown
-   and signed there is the quote (its recipient and token); any edit drops the quote.
+   **Cash out to any chain** (Portfolio → *Available on your account*): NEAR → 1Click → a token on another chain,
+   refunds to your NEAR account. What is shown and signed there is the quote (its recipient and token); any edit
+   drops the quote.
 
 ## Safety rules the code enforces
 

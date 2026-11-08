@@ -26,5 +26,8 @@ Next 16 App Router, React 19, Tailwind 4, pnpm. `pnpm typecheck && pnpm lint && 
   only; the amount signed is still `stakeAmountAfterDelivery`'s. Card pieces live in `StakeCard.tsx` and `PoolAvatar.tsx`.
 - Pages: `/`, `/stake`, `/portfolio` (positions and recent activity; `/positions` and `/history` redirect there in
   `next.config.ts`). Shared UI: `src/components/ui.tsx`, `InfoHint`, `StatusBadge`, `Disclosure`, `icons`.
+- Portfolio figures and activity wording are pure functions in `src/lib/portfolio.ts` (tested); the page is
+  `Positions` (cards in `PositionCard`, unstake / withdraw dialogs in `PositionModals`). `Modal`: Esc closes only the
+  top dialog; `open={false}` hides it but keeps its content mounted (a sent cash-out keeps being tracked).
 - Amounts are bigint; never `Number()` a bigint that can exceed 2^53 (use core's `bigintToNumber`).
 - English everywhere; sparse comments that say why.
