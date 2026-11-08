@@ -3,6 +3,7 @@ import { EpochClock } from "@/components/EpochClock";
 import { LandingStats } from "@/components/LandingStats";
 import { ValidatorList } from "@/components/ValidatorList";
 import { Panel } from "@/components/ui";
+import { SOURCE_ASSETS } from "@/lib/assets";
 
 const STEPS = [
   { n: "1", t: "Pick a validator", d: "Any standard NEAR pool with a fee of 10 % or less, checked live: code, pause, fee, validator set." },
@@ -19,7 +20,7 @@ export default function Home() {
           Stake NEAR <span className="text-accent">from any chain.</span>
         </h1>
         <p className="max-w-2xl text-lg text-muted">
-          Send what you already hold from 40+ chains. NEAR Intents delivers native NEAR to your own NEAR account, and one signature stakes it with the
+          Send what you already hold from any of {new Set(SOURCE_ASSETS.map((a) => a.chain)).size} chains. NEAR Intents delivers native NEAR to your own NEAR account, and one signature stakes it with the
           validator you pick, or mints rNEAR / LiNEAR. No bridge UI, no exchange, no NEAR needed up front.
         </p>
         <div className="flex flex-wrap gap-3">
