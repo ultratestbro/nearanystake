@@ -15,6 +15,53 @@ export interface Held {
 
 export const heldKey = (chain: string, symbol: string) => `${chain}|${symbol}`;
 
+/** The token's icon with its network's icon as a small badge (when they differ). */
+export function TokenIcon({ asset, size = 32, ring = "ring-surface-2" }: { asset: SourceAsset; size?: number; ring?: string }) {
+  const badge = Math.round(size / 2);
+  return (
+    <span className="relative shrink-0" style={{ width: size, height: size }}>
+      <Icon src={asset.icon} alt="" size={size} />
+      {asset.chainIcon && asset.chainIcon !== asset.icon && (
+        <span className={`absolute -bottom-1 -right-1 rounded-full ring-2 ${ring}`}>
+          <Icon src={asset.chainIcon} alt="" size={badge} />
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * The token chip that opens the sheet ("USDC · Base ⌄"). Without `onClick` it is the same chip,
+ * static (a quote's fixed token).
+ */
+export function PayWithButton({ asset, onClick, label = "Change what you pay with" }: { asset: SourceAsset | null; onClick?: () => void; label?: string }) {
+  const body = asset ? (
+    <>
+      <TokenIcon asset={asset} />
+      <span className="whitespace-nowrap">
+        {asset.symbol} <span className="font-normal">· {asset.chainLabel}</span>
+      </span>
+    </>
+  ) : (
+    <span className="px-1">Pick a token</span>
+  );
+  const cls = "inline-flex min-h-12 shrink-0 items-center gap-2 rounded-full border border-line bg-surface-2 py-1 pl-2 pr-3 text-[15px] font-semibold";
+  if (!onClick) return <span className={cls}>{body}</span>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={asset ? `${label}: ${asset.symbol} on ${asset.chainLabel}` : label}
+      className={`${cls} shadow-[inset_0_-2px_0_rgb(0_0_0/0.35)] transition hover:brightness-110 active:translate-y-px`}
+    >
+      {body}
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+        <path d="m6 9 6 6 6-6" />
+      </svg>
+    </button>
+  );
+}
+
 /**
  * "Pay with": a search field, a rail of networks (all, then the pinned ones, then those holding
  * something, then the rest) and the picked network's tokens, held first with their balances.

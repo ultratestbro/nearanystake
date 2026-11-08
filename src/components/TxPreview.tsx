@@ -7,9 +7,9 @@ const TGAS = 10n ** 12n;
 export function TxPreview({ transactions, title = "Exactly what you'll sign" }: { transactions: NearTransaction[]; title?: string }) {
   return (
     <div className="flex flex-col gap-2">
-      <p className="text-xs font-medium uppercase tracking-[0.06em] text-muted">{title}</p>
+      <p className="text-[13px] font-medium leading-5 text-muted">{title}</p>
       {transactions.map((t, i) => (
-        <div key={i} className="overflow-hidden rounded-xl border border-line bg-bg font-mono text-xs">
+        <div key={i} className="overflow-hidden rounded-xl border border-line bg-bg font-mono text-xs leading-5">
           <p className="border-b border-line px-3 py-2 text-muted">
             {transactions.length > 1 ? `tx ${i + 1} · ` : ""}to <span className="text-text">{t.receiverId}</span>
           </p>
@@ -20,7 +20,7 @@ export function TxPreview({ transactions, title = "Exactly what you'll sign" }: 
               const args = typeof f.args === "object" && !(f.args instanceof Uint8Array) ? JSON.stringify(f.args) : String(f.args);
               return (
                 <li key={j} className="flex flex-col gap-0.5 px-3 py-2">
-                  <span>
+                  <span className="[overflow-wrap:anywhere]">
                     <span className="text-accent">{f.methodName}</span>({args === "{}" ? "" : args})
                   </span>
                   <span className="text-muted">
