@@ -83,14 +83,13 @@ your wallet on chain X ──deposit──▶ 1Click / NEAR Intents ──native
 ## Any Wallet Kit and baseline disclosure
 
 Staking runs on two new [Any Wallet Kit](https://docs.anywallet.tech) modules, written during the hackathon window
-(from 2026-11-08) on branch `feat/near-staking` of `ultratestbro/anywalletkit`:
+(2026-11-08) and published to npm as 0.1.0 with provenance:
 
 - `@anywalletkit/protocol-staking-native-near`: pools, allow-list, epochs, APR, positions, stake / unstake / withdraw.
 - `@anywalletkit/protocol-staking-liquid-near`: LiNEAR and Rhea rNEAR, pinned by contract and code hash.
 
-Diff: https://github.com/ultratestbro/anywalletkit/compare/main...feat/near-staking. Until they are on npm the app
-installs them from `vendor/*.tgz`, packed from that branch; `vendor/README.md` lists the source commits and sha256
-of both tarballs.
+Their source is the seven commits in https://github.com/ultratestbro/anywalletkit/compare/d9fefda2...c91d06eb
+(tags `@anywalletkit/protocol-staking-native-near@0.1.0` and `@anywalletkit/protocol-staking-liquid-near@0.1.0`).
 
 Baseline (existed before the hackathon, by the same author): Any Wallet Kit's `core`, `wallet-near`, `wallet-solana`
 and `swap2-assets` packages (npm, Apache-2.0).
@@ -122,8 +121,6 @@ connections in the Pay step).
 
 - `src/lib/staking.ts`: the only door to the staking modules. It hands out one module instance per account (shared
   caches), with the app's RPCs, nearblocks history for exact unlock epochs and the archival node for liquid APRs.
-- `vendor/`: the two module tarballs, their source commits and hashes, and how to repack them
-  (`scripts/vendor-sdk.mjs`).
 - `e2e/`: the read-only mainnet checks behind `pnpm e2e`.
 - `src/lib/oneclick/`: request builder and echo check, browser client with the dry-run guard, status machine,
   dry-run replay. Recorded 1Click answers in `src/lib/__fixtures__/oneclick/`.
