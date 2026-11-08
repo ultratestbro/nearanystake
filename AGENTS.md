@@ -8,7 +8,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
-## Stake Anywhere
+## NearAnyStake
 
 Next 16 App Router, React 19, Tailwind 4, pnpm. `pnpm typecheck && pnpm lint && pnpm test && pnpm build`; dev on port 3501.
 

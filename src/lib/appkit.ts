@@ -40,7 +40,7 @@ function load() {
     const evm = ids.flatMap((id) => known.get(id) ?? []);
     const [first, ...rest] = evm.length ? evm : [networks.mainnet];
     const origin = window.location.origin;
-    const metadata = { name: "Stake Anywhere", description: "Stake NEAR from any chain", url: origin, icons: [`${origin}/icon-180.png`] };
+    const metadata = { name: "NearAnyStake", description: "Stake NEAR from any chain", url: origin, icons: [`${origin}/icon-180.png`] };
     const wagmiAdapter = new WagmiAdapter({ projectId: WC_PROJECT_ID, networks: [first!, ...rest] });
     const modal = createAppKit({
       adapters: [wagmiAdapter, new SolanaAdapter()],

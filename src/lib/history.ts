@@ -55,7 +55,7 @@ export interface KeyValue {
   setItem(k: string, v: string): void;
 }
 
-const KEY = "stake-anywhere.history.v1";
+const KEY = "nearanystake.history.v1";
 const MAX = 200;
 
 function store(): KeyValue | null {

@@ -1,4 +1,4 @@
-# Stake Anywhere
+# NearAnyStake
 
 **Stake NEAR from any chain.** Send USDC on Base, SOL, ETH, BTC, USDT on Tron or any of ~40 chains. NEAR Intents
 (1Click) delivers native NEAR to your own NEAR account, and one signature stakes it with the validator you pick, or
@@ -95,7 +95,7 @@ and `swap2-assets` packages (npm, Apache-2.0).
 
 **Other hackathon project by the same author: [NearJar](https://nearjar.xyz)**
 ([github.com/ultratestbro/nearjar](https://github.com/ultratestbro/nearjar)), donation jars for near.com accounts
-payable from any chain. The two projects are independent; Stake Anywhere reuses NearJar's wallet code (source-chain
+payable from any chain. The two projects are independent; NearAnyStake reuses NearJar's wallet code (source-chain
 payers, wallet-selector setup), the "Pay with" sheet, the route strip, the tactile buttons and the design tokens.
 
 AI disclosure: built with Claude Code.

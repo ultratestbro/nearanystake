@@ -12,7 +12,7 @@ const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"]
 const wordmark = Comfortaa({ weight: "700", subsets: ["latin"], display: "swap" });
 
 export const metadata: Metadata = {
-  title: "Stake Anywhere",
+  title: "NearAnyStake",
   description: "Stake NEAR from any chain: NEAR Intents delivers native NEAR to your account, one signature stakes it.",
 };
 
@@ -25,10 +25,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <AppProvider>
           <header className="border-b border-line">
             <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 py-3.5">
-              <Link href="/" aria-label="Stake Anywhere home" className="flex shrink-0 items-center gap-2">
+              <Link href="/" aria-label="NearAnyStake home" className="flex shrink-0 items-center gap-2">
                 <LogoMark size={30} />
                 <span className={`${wordmark.className} text-[18px] leading-none tracking-[-0.01em] sm:text-[20px]`}>
-                  stake<span className="text-accent">anywhere</span>
+                  near<span className="text-accent">anystake</span>
                 </span>
               </Link>
               {/* phones: logo + wallet on top, nav + dry-run switch below */}
@@ -50,7 +50,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <footer className="border-t border-line">
             <div className="mx-auto flex max-w-6xl flex-col gap-1.5 px-4 py-6 text-xs text-muted">
               <p>
-                Stake Anywhere is an independent project built for the NEAR Hackathon 2026. Cross-chain deposits route through NEAR Intents (1Click);
+                NearAnyStake is an independent project built for the NEAR Hackathon 2026. Cross-chain deposits route through NEAR Intents (1Click);
                 staking through{" "}
                 <a className="underline" href="https://docs.anywallet.tech">
                   Any Wallet Kit

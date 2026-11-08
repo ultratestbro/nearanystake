@@ -16,7 +16,7 @@ export async function connectBtcPayer(): Promise<Payer> {
   }
 
   const { request, AddressPurpose } = await import("sats-connect");
-  const r = (await request("wallet_connect", { addresses: [AddressPurpose.Payment], message: "Stake Anywhere deposit" })) as {
+  const r = (await request("wallet_connect", { addresses: [AddressPurpose.Payment], message: "NearAnyStake deposit" })) as {
     status: string;
     result?: { addresses: { address: string; purpose: string }[] };
     error?: { message?: string };

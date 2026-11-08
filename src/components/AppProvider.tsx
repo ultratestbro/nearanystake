@@ -7,7 +7,7 @@ import { DEMO_ACCOUNT, NEAR_NETWORK } from "@/lib/near/config";
 import { nearClient } from "@/lib/near/reads";
 import { selectorAccount, watchAccount, type SelectorAccount } from "@/lib/near/selector-account";
 
-const DRY_KEY = "stake-anywhere.dry";
+const DRY_KEY = "nearanystake.dry";
 
 export interface NearConnection {
   accountId: string;

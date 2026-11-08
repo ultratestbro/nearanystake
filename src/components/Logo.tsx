@@ -1,6 +1,6 @@
 import { MARK, NEAR_N_PATH } from "@/lib/brand";
 
-/** The Stake Anywhere mark; `size` is its height. */
+/** The NearAnyStake mark; `size` is its height. */
 export function LogoMark({ size = 32, arc = true }: { size?: number; arc?: boolean }) {
   return (
     <svg width={(size * 100) / 80} height={size} viewBox={MARK.viewBox} aria-hidden className="shrink-0">

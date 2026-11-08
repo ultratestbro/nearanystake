@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { StakeFlow } from "@/components/StakeFlow";
 
-export const metadata: Metadata = { title: "Stake · Stake Anywhere" };
+export const metadata: Metadata = { title: "Stake · NearAnyStake" };
 
 export default function StakePage() {
   return (

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { HistoryList } from "@/components/HistoryList";
 
-export const metadata: Metadata = { title: "History · Stake Anywhere" };
+export const metadata: Metadata = { title: "History · NearAnyStake" };
 
 export default function HistoryPage() {
   return (

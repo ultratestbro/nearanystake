@@ -1,4 +1,4 @@
-// Stake Anywhere mark: a NEAR coin in front of a small stack (staked), with three chain coins
+// NearAnyStake mark: a NEAR coin in front of a small stack (staked), with three chain coins
 // arriving along an arc (from any chain). Shared by the header and the icons so all copies match.
 
 /** The official NEAR "N" glyph, from NEAR's 512×512 app icon (glyph only, no tile). */

@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* The neutral greys and NEAR green shared with NearJar (same author); Stake Anywhere adds a warm
+/* The neutral greys and NEAR green shared with NearJar (same author); NearAnyStake adds a warm
    amber for "waiting" states and a violet for liquid staking tokens. */
 :root {
   --bg: #1f1f1f;
