@@ -22,6 +22,14 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },
+  // Positions and History moved into Portfolio; old links and bookmarks keep working (the query,
+  // e.g. ?view=demo, is passed through). Temporary, so browsers don't cache them for good.
+  async redirects() {
+    return [
+      { source: "/positions", destination: "/portfolio", permanent: false },
+      { source: "/history", destination: "/portfolio#activity", permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;

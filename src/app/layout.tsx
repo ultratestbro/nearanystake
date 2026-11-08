@@ -24,25 +24,20 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="flex min-h-full flex-col font-sans">
         <AppProvider>
           <header className="border-b border-line">
-            <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-x-4 gap-y-3 px-4 py-3.5">
-              <Link href="/" aria-label="NearAnyStake home" className="flex shrink-0 items-center gap-2">
+            {/* below lg two rows (brand + account, then tabs + mode); one row from lg up */}
+            <div className="mx-auto grid max-w-6xl grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-1 px-4 py-2 [grid-template-areas:'brand_account'_'nav_mode'] lg:flex lg:min-h-[72px] lg:gap-x-2 lg:py-3">
+              <Link href="/" aria-label="NearAnyStake home" className="flex min-h-11 shrink-0 items-center gap-2 rounded-lg [grid-area:brand] lg:mr-6">
                 <LogoMark size={30} />
                 <span className={`${wordmark.className} text-[18px] leading-none tracking-[-0.01em] sm:text-[20px]`}>
                   near<span className="text-accent">anystake</span>
                 </span>
               </Link>
-              {/* phones: logo + wallet on top, nav + dry-run switch below */}
-              <div className="flex items-center gap-2 sm:order-3">
-                <span className="hidden sm:block">
-                  <DryRunToggle compact />
-                </span>
-                <NearWalletButton />
+              <HeaderNav className="-ml-3 [grid-area:nav] lg:mr-auto lg:ml-0" />
+              <div className="justify-self-end [grid-area:mode]">
+                <DryRunToggle />
               </div>
-              <div className="flex w-full items-center justify-between gap-2 sm:order-2 sm:w-auto">
-                <HeaderNav />
-                <span className="sm:hidden">
-                  <DryRunToggle compact />
-                </span>
+              <div className="flex min-w-0 justify-end [grid-area:account]">
+                <NearWalletButton />
               </div>
             </div>
           </header>

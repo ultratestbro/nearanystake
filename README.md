@@ -12,8 +12,8 @@ holding funds or keys. The app never sees a private key.
 
 ## Try it in two minutes (no wallet, nothing to pay)
 
-Dry-run mode is on, also after you connect a NEAR wallet, until you switch it off yourself: real 1Click quotes, real
-pools and APRs, no deposit address.
+Dry-run mode is on until you connect a NEAR wallet (and stays on after that if you picked it with the switch in the
+header): real 1Click quotes, real pools and APRs, no deposit address.
 
 | Do | See |
 |---|---|
@@ -22,9 +22,9 @@ pools and APRs, no deposit address.
 | Press **Simulate: delivered** | Statuses shaped like real 1Click answers (labelled *simulated*) move through *Where your funds are now*: Base → NEAR Intents → your NEAR account → the pool. Then the stake step: **Will stake = exactly what was delivered**, capped only by what the account can spend, and **Preflight** shows the exact `deposit_and_stake` transaction the module built (pool, gas, deposit). |
 | New quote → **Refunded**, **Exchange took a fee**, **Failed**, **Deadline passed** | Every failure state and what it means for your money (an incomplete deposit is refunded at the deadline; the page keeps checking after it in case 1Click saw a deposit late). |
 | Tab **Liquid (rNEAR / LiNEAR)** or **Instant stNEAR** | rNEAR / LiNEAR minted after delivery (refused before quoting when the contract is paused or runs code the module has no pin for); Instant stNEAR offered only when your account exists and is registered on Meta Pool; its quote shows the stNEAR you get. |
-| **Positions** → *Demo: nima.near* | A public delegator (on 2026-11-08: **168.9 NEAR unbonding** in `astro-stakers.poolv1.near`): the unlock window as dates and a countdown, Unstake / Withdraw with Preflight. Signing is disabled: it is not your account. |
-| **History** | Every quote you requested, with the whole 1Click response including its `signature` (the API asks clients to keep it for disputes), statuses and explorer links. |
-| Connect a NEAR wallet (Meteor, HERE, Intear), switch to **Live** | A payable quote with a one-time deposit address, QR, memo when needed and a countdown to when the refund begins (1 h; 3 h for Bitcoin, Zcash, Litecoin, Dogecoin and Bitcoin Cash, and paying stops 5 / 90 min before it); pay once from an EVM, Solana, TON, Tron or Bitcoin wallet, or by hand; then one signature stakes. A brand-new implicit account works: the delivery creates it. |
+| **Portfolio** → *Demo: nima.near* (`/positions` redirects here) | A public delegator (on 2026-11-08: **168.9 NEAR unbonding** in `astro-stakers.poolv1.near`): the unlock window as dates and a countdown, Unstake / Withdraw with Preflight. Signing is disabled: it is not your account. |
+| **Portfolio** → *Recent activity* (`/history` redirects here) | Every quote you requested, with the whole 1Click response including its `signature` (the API asks clients to keep it for disputes), statuses and explorer links. |
+| Connect a NEAR wallet (Meteor, HERE, Intear): the header switch turns to **Live** | A payable quote with a one-time deposit address, QR, memo when needed and a countdown to when the refund begins (1 h; 3 h for Bitcoin, Zcash, Litecoin, Dogecoin and Bitcoin Cash, and paying stops 5 / 90 min before it); pay once from an EVM, Solana, TON, Tron or Bitcoin wallet, or by hand; then one signature stakes. A brand-new implicit account works: the delivery creates it. |
 
 ## How it works
 
@@ -40,7 +40,7 @@ your wallet on chain X ──deposit──▶ 1Click / NEAR Intents ──native
 2. **Deposit and track.** `/v0/status` every 5 s (once a minute past the deadline): `PENDING_DEPOSIT`,
    `KNOWN_DEPOSIT_TX`, `INCOMPLETE_DEPOSIT`, `PROCESSING`, `SUCCESS`, `REFUNDED`, `FAILED`. The countdown ends when
    the refund begins (the request's deadline), not at the quote's `deadline` (when the address goes inactive,
-   72 h later). After a wallet payment the Pay button is gone for good; a flow reopened from History shows nothing
+   72 h later). After a wallet payment the Pay button is gone for good; a flow reopened from Recent activity shows nothing
    payable until 1Click answers, and an unknown status is never payable.
 3. **Stake.** `amount = min(delivered, getMaxStakeable())`, where delivered is the lower of the Transfer from
    `intents.near` in the NEAR delivery transaction and 1Click's `swapDetails.amountOut`, both read fresh at every
@@ -74,7 +74,8 @@ your wallet on chain X ──deposit──▶ 1Click / NEAR Intents ──native
   validator sets. `lst-pool.near` and `meta-pool.near` are refused. Exits only need the suffix and code checks (or
   code the `pool.near` factory allows), so you can always leave a pool that raised its fee or paused.
 - **Dry run can't pay.** In dry mode the client refuses to POST `dry: false`, no deposit address is ever rendered,
-  and leaving dry mode needs a connected NEAR wallet and the user's own switch (connecting alone keeps it dry).
+  and leaving dry mode needs a connected NEAR wallet, which is then the only recipient. Connecting one switches to
+  live unless the user picked dry run before (remembered in this browser); the switch stays in the header.
 - **Refunds.** The refund address must be your own wallet (a checkbox unless it came from a connected wallet);
   exchange, memo and minimum-amount warnings (Tron: $100) before you pay.
 - **Preflight, not simulation.** NEAR RPC can't dry-run a transaction. Preflight runs the module's quote, which reads

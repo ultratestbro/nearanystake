@@ -52,7 +52,7 @@ type Stage = "setup" | "review" | "track";
 export function StakeFlow() {
   const params = useSearchParams();
   const { near, dryRun, demo } = useApp();
-  // a flow reopened from History (?flow=…) resumes at its status; this component renders on the client only
+  // a flow reopened from Recent activity (?flow=…) resumes at its status; this component renders on the client only
   const [resumed] = useState(() => {
     const id = params.get("flow");
     const r = id ? getFlow(id) : null;
@@ -328,7 +328,7 @@ function Facts() {
   return (
     <div className="flex flex-col gap-2 rounded-2xl border border-line bg-surface p-4 text-sm text-muted">
       <p className="font-medium text-text">Good to know</p>
-      <p>An epoch is about 7 h (43 200 blocks; the clock on Positions is measured). Native unstaking takes 4 epoch boundaries: about 21–28 h.</p>
+      <p>An epoch is about 7 h (43 200 blocks; the clock on Portfolio is measured). Native unstaking takes 4 epoch boundaries: about 21–28 h.</p>
       <p>rNEAR and LiNEAR unstake in 4–5+ epochs (≈ 21–35 h or more); the exact epoch shows after you unstake.</p>
       <p>
         About 0.05 NEAR stays on your account so you can unstake later: NEAR holds back a transaction&apos;s prepaid gas when it accepts it and refunds the unused part seconds later. A
@@ -577,7 +577,7 @@ function QuoteAndTrack({
           <Row label="Quote check">
             <span className="text-accent">✓ echo matches what you approved</span>
             <span className="block text-xs text-muted">recipient {shortAccount(quote.req.recipient)} · refund {shortAccount(quote.req.refundTo)} · {quote.req.destinationAsset} · {quote.req.recipientType}</span>
-            <span className="block text-xs text-muted">signed quote saved in History</span>
+            <span className="block text-xs text-muted">signed quote saved in Recent activity</span>
           </Row>
         </Rows>
 
@@ -669,7 +669,7 @@ function QuoteAndTrack({
             {phase === "unknown" && (
               <Banner tone="warn" title={status ? `1Click says ${status.status}` : "Checking the swap status"}>
                 {status
-                  ? "This app doesn't know that status, so nothing is offered to pay or stake. The signed quote is in History; 1Click support can look it up by the deposit address."
+                  ? "This app doesn't know that status, so nothing is offered to pay or stake. The signed quote is in Recent activity (Portfolio); 1Click support can look it up by the deposit address."
                   : "Asking 1Click where this swap is. Nothing can be paid or staked until it answers."}
               </Banner>
             )}
@@ -685,7 +685,7 @@ function QuoteAndTrack({
             {phase === "failed" && (
               <Banner tone="danger" title="1Click reports the swap failed">
                 Check {shortAccount(quote.req.refundTo)} on {asset.chainLabel} for a refund. If nothing arrives, contact 1Click support with the deposit address{" "}
-                <span className="break-all font-mono text-xs">{res.quote.depositAddress}</span>; the signed quote is saved in History.
+                <span className="break-all font-mono text-xs">{res.quote.depositAddress}</span>; the signed quote is saved in Recent activity.
               </Banner>
             )}
             {phase === "expired" && (
@@ -696,7 +696,7 @@ function QuoteAndTrack({
             )}
             {!instant && phase === "delivered" && stakeState === "done" && record?.staked && (
               <Banner tone="accent" title="Already staked">
-                {formatNear(BigInt(record.staked))} of this delivery is staked in {targetLabel(target)}. See it under Positions.
+                {formatNear(BigInt(record.staked))} of this delivery is staked in {targetLabel(target)}. See it in Portfolio.
               </Banner>
             )}
             {!instant && phase === "delivered" && !(stakeState === "done" && record?.staked) && (
@@ -890,7 +890,7 @@ function StakeStep({
       }
       setUnconfirmed(before === null ? Date.now() : null);
       setPreflight(null);
-      setErr(`${stakingErrorText(e)} ${before === null ? "The position couldn't be read, so check Positions before you sign again." : "The stake isn't on chain after 12 s. Preflight again to retry."}`);
+      setErr(`${stakingErrorText(e)} ${before === null ? "The position couldn't be read, so check Portfolio before you sign again." : "The stake isn't on chain after 12 s. Preflight again to retry."}`);
       setStake("failed");
     }
   };
@@ -898,7 +898,7 @@ function StakeStep({
   if (stake === "done")
     return (
       <Banner tone="accent" title="Staked">
-        {formatNear(staked ?? amount?.amount ?? 0n)} is staked in {targetLabel(target)}. {hash && <TxLink chain="near:mainnet" hash={hash} />} See it under Positions.
+        {formatNear(staked ?? amount?.amount ?? 0n)} is staked in {targetLabel(target)}. {hash && <TxLink chain="near:mainnet" hash={hash} />} See it in Portfolio.
       </Banner>
     );
 
@@ -937,10 +937,10 @@ function StakeStep({
       )}
       {unconfirmed !== null && (
         <Banner tone="warn" title="A stake may already have gone through">
-          A stake for this delivery was signed {ago(unconfirmed)} and its result wasn&apos;t confirmed. Check Positions first: signing again would stake other NEAR on the account.
+          A stake for this delivery was signed {ago(unconfirmed)} and its result wasn&apos;t confirmed. Check Portfolio first: signing again would stake other NEAR on the account.
           <label className="mt-2 flex items-start gap-2 text-sm">
             <input type="checkbox" checked={checkedNotStaked} onChange={(e) => setCheckedNotStaked(e.target.checked)} className="mt-1 accent-[var(--accent)]" />
-            <span>I checked Positions: this delivery is not staked.</span>
+            <span>I checked Portfolio: this delivery is not staked.</span>
           </label>
         </Banner>
       )}

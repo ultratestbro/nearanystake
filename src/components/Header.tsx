@@ -2,85 +2,164 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
+import { NEAR_N_PATH } from "@/lib/brand";
 import { shortAccount } from "@/lib/format";
 import { useApp } from "./AppProvider";
-import { Icon } from "./ui";
+import { ChevronDownIcon } from "./icons";
+import { Icon, Skeleton } from "./ui";
 
 const NAV = [
   { href: "/stake", label: "Stake" },
-  { href: "/positions", label: "Positions" },
-  { href: "/history", label: "History" },
+  { href: "/portfolio", label: "Portfolio" },
 ];
 
-export function HeaderNav() {
+/** Two tabs; the current one is underlined (no pressed-button look). */
+export function HeaderNav({ className = "" }: { className?: string }) {
   const path = usePathname();
   return (
-    <nav aria-label="Main" className="no-scrollbar flex gap-1.5 overflow-x-auto pb-0.5">
-      {NAV.map((n) => (
-        <Link key={n.href} href={n.href} aria-current={path.startsWith(n.href) ? "page" : undefined} className="btn-tactile shrink-0 px-3.5 py-2 text-sm font-medium">
-          {n.label}
-        </Link>
-      ))}
+    <nav aria-label="Main" className={`flex gap-1 ${className}`}>
+      {NAV.map((n) => {
+        const current = path === n.href || path.startsWith(`${n.href}/`);
+        return (
+          <Link
+            key={n.href}
+            href={n.href}
+            aria-current={current ? "page" : undefined}
+            className={`relative inline-flex min-h-11 items-center rounded-md px-3 text-[15px] transition-colors after:absolute after:inset-x-2 after:bottom-0 after:h-0.5 after:rounded-full ${
+              current ? "font-semibold text-text after:bg-accent" : "font-medium text-muted hover:text-text"
+            }`}
+          >
+            {n.label}
+          </Link>
+        );
+      })}
     </nav>
   );
 }
 
-/** Dry run on/off. Off needs a NEAR wallet: every live quote delivers to it. */
-export function DryRunToggle({ compact = false }: { compact?: boolean }) {
-  const { dryRun, setDryRun, near } = useApp();
-  const blocked = !near && dryRun;
+/**
+ * Dry run / Live, with what it means in plain words. Dry without a NEAR wallet (live quotes deliver
+ * to it), so there the control offers to connect one; connecting turns live on by itself unless the
+ * user picked dry run before (lib/dryrun.ts).
+ */
+export function DryRunToggle({ className = "" }: { className?: string }) {
+  const { dryRun, setDryRun, near, connectNear, connecting, restoring } = useApp();
+  const needsWallet = dryRun && !near;
+  const id = useId();
+  const action = needsWallet ? "Connect a NEAR wallet to go live." : dryRun ? "Click to go live." : "Click to switch to dry run.";
+  const meaning = dryRun
+    ? "Dry run shows real quotes but never creates a deposit address, so nothing can be paid by accident."
+    : "Live: quotes come with a deposit address and payments are real.";
   return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={dryRun}
-      onClick={() => setDryRun(!dryRun)}
-      aria-disabled={blocked}
-      title={blocked ? "Connect a NEAR wallet to leave dry-run mode" : dryRun ? "Dry run: real quotes, nothing payable" : "Live: deposits are real"}
-      className={`btn-tactile shrink-0 gap-2 px-3 py-2 text-sm font-medium ${blocked ? "cursor-help" : ""}`}
-    >
-      <span className={`relative inline-flex h-4 w-7 items-center rounded-full transition ${dryRun ? "bg-warn/80" : "bg-accent"}`}>
-        <span className={`absolute size-3 rounded-full bg-bg transition ${dryRun ? "left-0.5" : "left-[14px]"}`} />
+    <>
+      <button
+        type="button"
+        onClick={() => (needsWallet ? void connectNear({ live: true }) : setDryRun(!dryRun))}
+        disabled={restoring || (needsWallet && connecting)}
+        aria-describedby={id}
+        title={`${meaning} ${action}`}
+        className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-line py-1 pl-2 pr-3 text-left transition-colors hover:bg-surface disabled:cursor-wait disabled:opacity-60 ${className}`}
+      >
+        <span aria-hidden className={`relative h-5 w-8 shrink-0 rounded-full transition-colors ${dryRun ? "bg-surface-2" : "bg-accent"}`}>
+          <span className={`absolute top-0.5 size-4 rounded-full transition-[left] ${dryRun ? "left-0.5 bg-muted" : "left-3.5 bg-accent-ink"}`} />
+        </span>
+        <span className="flex flex-col leading-4">
+          <span className="text-[13px] font-medium">{dryRun ? "Dry run" : "Live"}</span>
+          {dryRun ? (
+            <span className="text-xs text-muted">
+              <span className="sm:hidden">Nothing to pay</span>
+              <span className="hidden sm:inline">Real quotes, nothing to pay</span>
+            </span>
+          ) : (
+            <span className="text-xs text-muted">Payments are real</span>
+          )}
+        </span>
+      </button>
+      <span id={id} hidden>
+        {action}
       </span>
-      {compact ? (dryRun ? "Dry" : "Live") : dryRun ? "Dry run" : "Live"}
-    </button>
+    </>
   );
 }
 
+/** The NEAR account chip: connect, or the account with a small menu (Portfolio, Disconnect). */
 export function NearWalletButton() {
   const { near, restoring, connecting, connectNear, disconnectNear, error } = useApp();
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
   useEffect(() => {
     if (!open) return;
-    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
+    const outside = (e: PointerEvent) => !box.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setOpen(false);
+      button.current?.focus();
+    };
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("pointerdown", outside);
+      document.removeEventListener("keydown", esc);
+    };
   }, [open]);
+
+  if (!near && restoring)
+    return (
+      <span role="status" className="block">
+        <Skeleton className="h-11 w-36 rounded-full" />
+        <span className="sr-only">Checking for a connected NEAR wallet…</span>
+      </span>
+    );
 
   if (!near)
     return (
       <div className="flex flex-col items-end">
-        <button type="button" onClick={() => void connectNear()} disabled={connecting || restoring} className="btn-tactile-accent shrink-0 px-3.5 py-2 text-sm">
-          {connecting ? "Connecting…" : restoring ? "…" : "Connect NEAR"}
+        <button type="button" onClick={() => void connectNear()} disabled={connecting} className="btn-tactile-accent min-h-11 shrink-0 px-4 text-sm">
+          {connecting ? "Connecting…" : "Connect NEAR"}
         </button>
-        {error && <span className="mt-1 max-w-48 text-right text-xs text-danger">{error}</span>}
+        {error && (
+          <p role="alert" className="mt-1 max-w-56 text-right text-xs text-danger">
+            {error}
+          </p>
+        )}
       </div>
     );
+
   return (
-    <div ref={ref} className="relative">
-      <button type="button" onClick={() => setOpen(!open)} className="btn-tactile max-w-44 shrink-0 px-3 py-2 text-sm font-medium">
-        {near.icon ? <Icon src={near.icon} alt="" size={18} /> : null}
-        <span className="truncate">{shortAccount(near.accountId)}</span>
+    <div ref={box} className="relative min-w-0">
+      <button
+        ref={button}
+        type="button"
+        aria-expanded={open}
+        aria-controls={menuId}
+        onClick={() => setOpen(!open)}
+        className="btn-tactile min-h-11 max-w-full gap-2 rounded-full border border-line py-1 pl-1.5 pr-3 text-left"
+      >
+        <span aria-hidden className="grid size-7 shrink-0 place-items-center rounded-full bg-accent sm:size-8">
+          <svg viewBox="0 0 512 512" className="size-4">
+            <path d={NEAR_N_PATH} fill="var(--accent-ink)" />
+          </svg>
+        </span>
+        <span className="flex min-w-0 flex-col leading-4">
+          <span className="sr-only">NEAR account </span>
+          <span className="truncate text-sm font-semibold">{shortAccount(near.accountId)}</span>
+          <span className="truncate text-xs text-muted">{near.walletName}</span>
+        </span>
+        <ChevronDownIcon className={`hidden text-muted sm:block motion-safe:transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
-        <div className="absolute right-0 z-40 mt-2 w-64 rounded-2xl border border-line bg-panel p-3 text-sm shadow-xl">
-          <p className="text-xs text-muted">Connected with {near.walletName}</p>
-          <p className="mt-0.5 break-all font-mono text-xs">{near.accountId}</p>
+        <div id={menuId} className="absolute right-0 top-full z-40 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border border-line bg-panel p-3 text-sm shadow-xl">
+          <p className="flex items-center gap-2 text-xs text-muted">
+            {near.icon && <Icon src={near.icon} alt="" size={16} />}
+            Connected with {near.walletName}
+          </p>
+          <p className="mt-1 break-all font-mono text-[13px]">{near.accountId}</p>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <Link href="/positions" onClick={() => setOpen(false)} className="btn-tactile justify-center px-3 py-2 text-xs font-medium">
-              Positions
+            <Link href="/portfolio" onClick={() => setOpen(false)} className="btn-tactile min-h-11 justify-center px-3 text-sm font-medium">
+              Portfolio
             </Link>
             <button
               type="button"
@@ -88,7 +167,7 @@ export function NearWalletButton() {
                 setOpen(false);
                 disconnectNear();
               }}
-              className="btn-tactile justify-center px-3 py-2 text-xs font-medium"
+              className="btn-tactile min-h-11 justify-center px-3 text-sm font-medium"
             >
               Disconnect
             </button>

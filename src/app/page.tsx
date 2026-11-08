@@ -26,7 +26,7 @@ export default function Home() {
           <Link href="/stake" className="btn-tactile-accent btn-tactile-lg px-6 py-3.5 text-base">
             Start staking
           </Link>
-          <Link href="/positions?view=demo" className="btn-tactile btn-tactile-lg px-6 py-3.5 text-base font-medium">
+          <Link href="/portfolio?view=demo" className="btn-tactile btn-tactile-lg px-6 py-3.5 text-base font-medium">
             See a demo account
           </Link>
         </div>

@@ -40,7 +40,7 @@ export function Positions() {
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold sm:text-3xl">Positions</h1>
+          <h1 className="text-2xl font-semibold sm:text-3xl">Portfolio</h1>
           <p className="truncate text-muted">
             <span className="font-mono">{accountId}</span> {s.readOnly && <Pill tone="warn">read-only demo</Pill>}
           </p>

@@ -240,7 +240,7 @@ export function WithdrawOut() {
           NEAR deposit <TxLink chain="near:mainnet" hash={hash} />
           {status?.status ? ` · 1Click: ${status.status}` : ""}
           {phase === "expired" && <span className="block text-sm">1Click hasn&apos;t taken the deposit in time: it refunds to {shortAccount(account)}. This keeps checking once a minute.</span>}
-          {phase === "failed" && <span className="block text-sm">Check {shortAccount(account)} for the refund; if nothing arrives, contact 1Click support with the deposit address (the signed quote is in History).</span>}
+          {phase === "failed" && <span className="block text-sm">Check {shortAccount(account)} for the refund; if nothing arrives, contact 1Click support with the deposit address (the signed quote is in Recent activity).</span>}
         </Banner>
       )}
       {sheet && (
