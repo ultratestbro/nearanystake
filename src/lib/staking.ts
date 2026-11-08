@@ -19,7 +19,7 @@ let pricer: { rpc: NearRpc; p: GasPricer } | null = null;
 /**
  * The NEAR the node holds back when it accepts `txs` (prepaid gas bought at min_gas_purchase_price,
  * 10× the gas price on mainnet), by the modules' own fee model. For the app's own transactions (the
- * wNEAR deposit of "Withdraw to any chain").
+ * wNEAR deposit of "Cash out to any chain").
  */
 export async function upfrontGas(rpc: NearRpc, txs: NearTransaction[]): Promise<bigint> {
   if (pricer?.rpc !== rpc) pricer = { rpc, p: new GasPricer(() => rpc) };

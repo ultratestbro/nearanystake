@@ -1,464 +1,396 @@
 "use client";
 
+// The Portfolio (direction C): what is staked and what it earns, what is on its way out, every
+// position with the action that fits its state, the NEAR left on the account with a way to cash it
+// out, today's rates, and recent activity (passed in as `activity`). Reads are the staking modules';
+// the dialogs are in PositionModals, the cards in PositionCard.
+
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
-import { addRecord, newId } from "@/lib/history";
-import { dateTime, duration, formatNear, formatUnits, parseUnits, percent, shortAccount } from "@/lib/format";
-import {
-  LIQUID_OPTIONS, UNSTAKED_DUST, refusalText, stakingErrorText,
-  type LiquidPreset, type LiquidStaking, type NativeStaking, type NearClaimQuote, type NearPoolPosition, type NearUnstakeQuote, type LiquidUnstakeQuote, type LiquidClaimQuote, type UnlockEstimate,
-} from "@/lib/staking";
+import { useCallback, useState, type ReactNode } from "react";
+import { duration, formatNear, formatUnits, percent, shortAccount } from "@/lib/format";
+import { nearSpendable } from "@/lib/near/reads";
+import { listTokens } from "@/lib/oneclick/client";
+import { heroAmount, smallNear, summarize, usdText, type Holding } from "@/lib/portfolio";
+import { DEFAULT_RESERVE, LIQUID_OPTIONS, UNSTAKED_DUST, refusalText, type LiquidPreset, type NearEpoch, type UnlockEstimate } from "@/lib/staking";
 import { useAsync, useNow } from "@/lib/useAsync";
 import { useApp } from "./AppProvider";
-import { EpochClock } from "./EpochClock";
-import { useAccountStaking } from "./hooks";
+import { EpochClock, unbondingWindow, useEpoch } from "./EpochClock";
+import { useAccountStaking, useNetworkStaking } from "./hooks";
+import { ArrowRightIcon, PlusIcon } from "./icons";
 import { Modal } from "./Modal";
-import { TxLink } from "./TxLink";
-import { TxPreview } from "./TxPreview";
+import { LiquidPositionCard, NativePositionCard, liquidHolding, type LiquidData } from "./PositionCard";
+import { StatusBadge } from "./StatusBadge";
+import { Banner, Skeleton } from "./ui";
 import { WithdrawOut } from "./WithdrawOut";
-import { Banner, Panel, Pill, PillTabs, Row, Rows, Skeleton, Spinner } from "./ui";
 
-const WARN_TEXT: Record<string, string> = {
-  "pool-fee-above-max": "fee raised above 10 %",
-  "pool-paused": "pool paused",
-  "pool-leaving-set": "leaving the validator set",
-  "pool-not-in-set": "not validating",
-};
+type Settled<T> = { ok: true; value: T } | { ok: false; error: string };
+const settle = <T,>(p: Promise<T>): Promise<Settled<T>> => p.then((value) => ({ ok: true as const, value }), (e: unknown) => ({ ok: false as const, error: e instanceof Error ? e.message : String(e) }));
 
-export function Positions() {
+/** Under this, NEAR left on the account is the stake's gas reserve and refunded gas, not savings. */
+const RESERVE_LIKE = 25n * 10n ** 22n; // 0.25 NEAR
+
+type Mode = "mine" | "demo" | "connect" | "restoring";
+
+export function Positions({ activity }: { activity?: ReactNode }) {
   const params = useSearchParams();
-  const { near, demoId } = useApp();
-  const [view, setView] = useState<"mine" | "demo">(params.get("view") === "demo" ? "demo" : "mine");
-  const effective = view === "mine" && near ? "mine" : "demo";
-  const s = useAccountStaking(effective);
-  // getStakedBalance, not listPositions: when the pool lookup is down it still shows the known pools and says so
-  const balance = useAsync(() => s.native.getStakedBalance(), [s], 60_000);
-  const positions = { ...balance, data: balance.data?.positions };
-  const accountId = s.accountId ?? demoId;
-
+  const { near, demoId, restoring } = useApp();
+  const mode: Mode = params.get("view") === "demo" ? "demo" : near ? "mine" : restoring ? "restoring" : "connect";
+  const s = useAccountStaking(mode === "mine" ? "mine" : "demo");
+  const account = s.accountId ?? demoId;
   return (
-    <div className="flex flex-col gap-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold sm:text-3xl">Portfolio</h1>
-          <p className="truncate text-muted">
-            <span className="font-mono">{accountId}</span> {s.readOnly && <Pill tone="warn">read-only demo</Pill>}
-          </p>
-        </div>
-        <PillTabs
-          tabs={[
-            { id: "mine", label: near ? "My account" : "My account (connect)" },
-            { id: "demo", label: `Demo: ${demoId}` },
-          ]}
-          value={effective}
-          onChange={(v) => setView(v)}
-        />
-      </div>
-      {view === "mine" && !near && <Banner title="Connect a NEAR wallet to see your own positions">Meanwhile this shows a public delegator&apos;s account, read-only.</Banner>}
-      {effective === "demo" && (
-        <Banner title="Demo account">
-          A public delegator picked because it has NEAR unbonding: you can see the epoch countdown and preflight unstake and withdraw. Nothing can be signed for it.
-        </Banner>
-      )}
-
-      <EpochClock />
-
-      <Panel className="flex flex-col gap-4 p-4 sm:p-6">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-semibold">Validator pools</h2>
-          <ClaimAll native={s.native} readOnly={s.readOnly} positions={positions.data ?? []} onDone={positions.reload} account={accountId} />
-        </div>
-        {positions.error && <p className="text-sm text-danger">{positions.error}</p>}
-        {balance.data?.partial && (
-          <Banner tone="warn" title="Pool lookup is down">
-            fastnear&apos;s index didn&apos;t answer, so only pools this app already knows are shown. Stake elsewhere is safe; it shows up again once the lookup is back.
-          </Banner>
-        )}
-        {!positions.data && !positions.error && <Skeleton className="h-28 w-full" />}
-        {positions.data?.length === 0 && <p className="text-sm text-muted">No native stake on this account yet.</p>}
-        <div className="grid gap-3 md:grid-cols-2">
-          {positions.data?.map((p) => <PositionCard key={p.pool} p={p} native={s.native} readOnly={s.readOnly} account={accountId} onDone={positions.reload} />)}
-        </div>
-      </Panel>
-
-      <Panel className="flex flex-col gap-4 p-4 sm:p-6">
-        <h2 className="text-lg font-semibold">Liquid staking</h2>
-        <div className="grid gap-3 md:grid-cols-2">
-          {LIQUID_OPTIONS.map((o) => (
-            <LiquidCard key={o.id} preset={o.id} ls={s.liquid[o.id]} readOnly={s.readOnly} account={accountId} />
-          ))}
-        </div>
-      </Panel>
-
-      {effective === "mine" && near && <WithdrawOut />}
+    <div className="flex flex-col gap-6 sm:gap-8">
+      <h1 className="sr-only">Portfolio</h1>
+      {mode === "demo" && <DemoNote />}
+      {/* keyed by account: figures of one account never show under another while the next one loads */}
+      <Dashboard key={`${mode}:${account}`} mode={mode} account={account} s={s} activity={activity} />
     </div>
   );
 }
 
-function UnlockLine({ u }: { u: UnlockEstimate }) {
-  const now = useNow(30_000);
-  const to = u.at ?? u.earliestAt;
+function DemoNote() {
+  const { near, demoId, connectNear, connecting } = useApp();
   return (
-    <div className="flex flex-col gap-0.5 text-sm">
-      <span>
-        {to > now ? `Unlocks in ${duration(to - now)}` : "Unlocking at the next epoch boundary"}
-        {u.latestAt && u.latestAt !== to ? ` – ${duration(Math.max(0, u.latestAt - now))}` : ""}
-      </span>
-      <span className="text-xs text-muted">
-        epoch {u.epoch !== null ? u.epoch.toString() : `${u.earliestEpoch.toString()}${u.latestEpoch !== null && u.latestEpoch !== u.earliestEpoch ? `–${u.latestEpoch.toString()}` : "+"}`} · {dateTime(to)}
-        {u.latestAt && u.latestAt !== to ? ` to ${dateTime(u.latestAt)}` : ""} · {u.source === "history" ? "dated from your last unstake" : u.source === "contract" ? "from the contract" : "estimate: the pool only says “not yet”"}
-      </span>
-    </div>
-  );
-}
-
-function PositionCard({ p, native, readOnly, account, onDone }: { p: NearPoolPosition; native: NativeStaking; readOnly: boolean; account: string; onDone: () => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate font-medium">{p.pool}</p>
-          <p className="text-xs text-muted">
-            {p.poolInfo?.feePercent !== null && p.poolInfo?.feePercent !== undefined ? `${percent(p.poolInfo.feePercent, 0)} fee · ` : ""}
-            {p.poolInfo?.apr !== null && p.poolInfo?.apr !== undefined ? `${percent(p.poolInfo.apr)} APR` : ""}
-          </p>
-        </div>
-        <div className="flex flex-wrap justify-end gap-1">
-          {p.warnings.map((w) => (
-            <Pill key={w} tone="warn">
-              {WARN_TEXT[w] ?? w}
-            </Pill>
-          ))}
-        </div>
-      </div>
-      <Rows>
-        <Row label="Staked">{formatNear(p.staked)}</Row>
-        <Row label="Unstaked">{formatNear(p.unstaked)}</Row>
-        <Row label="Withdrawable">{p.withdrawable > 0n ? <span className="text-accent">{formatNear(p.withdrawable)}</span> : "0 NEAR"}</Row>
-      </Rows>
-      {p.unlock && <UnlockLine u={p.unlock} />}
-      <div className="flex flex-wrap gap-2">
-        {/* rounding dust left staked is not worth an unstake: it would restart the unlock timer of everything unstaking here */}
-        <button type="button" onClick={() => setOpen(true)} disabled={p.staked < UNSTAKED_DUST} title={p.staked > 0n && p.staked < UNSTAKED_DUST ? "Only rounding dust is staked here" : undefined} className="btn-tactile px-3.5 py-2 text-sm font-medium">
-          Unstake
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-line bg-panel px-4 py-2.5 text-sm">
+      <StatusBadge>Demo</StatusBadge>
+      <p className="min-w-0 flex-[1_1_16rem] text-muted">
+        <span className="font-mono text-text">{demoId}</span> is a public account with NEAR unstaking. Read-only: preview unstake and withdraw, nothing can be signed.
+      </p>
+      {near ? (
+        <Link href="/portfolio" className="inline-flex min-h-11 items-center font-medium text-accent hover:underline">
+          Show my account
+        </Link>
+      ) : (
+        <button type="button" onClick={() => void connectNear()} disabled={connecting} className="inline-flex min-h-11 items-center font-medium text-accent hover:underline disabled:opacity-60">
+          {connecting ? "Connecting…" : "Connect my wallet"}
         </button>
-      </div>
-      {open && <UnstakeModal pool={p.pool} staked={p.staked} position={p} native={native} readOnly={readOnly} account={account} onClose={() => setOpen(false)} onDone={onDone} />}
+      )}
     </div>
   );
 }
 
-function UnstakeModal({ pool, staked, position, native, readOnly, account, onClose, onDone }: { pool: string; staked: bigint; position: NearPoolPosition; native: NativeStaking; readOnly: boolean; account: string; onClose: () => void; onDone: () => void }) {
-  const [text, setText] = useState("");
-  const [all, setAll] = useState(true);
-  // the module refuses to restart a running unbonding wait unless the user says so here
-  const [allowTimerReset, setAllowTimerReset] = useState(false);
-  const [q, setQ] = useState<NearUnstakeQuote | null>(null);
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [hash, setHash] = useState("");
-  const amount = all ? ("all" as const) : parseUnits(text, 24);
+function Dashboard({ mode, account, s, activity }: { mode: Mode; account: string; s: ReturnType<typeof useAccountStaking>; activity?: ReactNode }) {
+  const on = mode === "mine" || mode === "demo";
+  const network = useNetworkStaking();
+  const now = useNow(30_000);
+  const epoch = useEpoch().data;
 
-  const preflight = async () => {
-    setErr("");
-    setQ(null);
-    if (amount === null) return setErr("Enter an amount.");
-    setBusy(true);
-    try {
-      setQ(await native.quoteRequestWithdrawal({ amount, pool, allowTimerReset }));
-    } catch (e) {
-      setErr(stakingErrorText(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const sign = async () => {
-    if (!q || amount === null) return;
-    setBusy(true);
-    setErr("");
-    try {
-      const r = await native.requestWithdrawal({ amount, pool, allowTimerReset, expected: q.transactions });
-      setHash(r.hash);
-      addRecord({ id: newId(), type: "action", kind: "unstake", createdAt: Date.now(), account, target: pool, amount: q.amount.toString(), txs: r.hashes.map((h) => ({ chain: "near:mainnet", hash: h, label: "Unstake" })) });
-      onDone();
-    } catch (e) {
-      setErr(stakingErrorText(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <Modal title={`Unstake from ${pool.replace(/\.(poolv1|pool)\.near$/, "")}`} onClose={onClose}>
-      <div className="flex flex-col gap-3">
-        <div className="flex gap-2">
-          <button type="button" aria-pressed={all} onClick={() => setAll(true)} className="btn-tactile px-3 py-1.5 text-sm">
-            All ({formatNear(staked, 3)})
-          </button>
-          <button type="button" aria-pressed={!all} onClick={() => setAll(false)} className="btn-tactile px-3 py-1.5 text-sm">
-            Amount
-          </button>
-        </div>
-        {!all && <input value={text} onChange={(e) => setText(e.target.value)} placeholder="NEAR" inputMode="decimal" className="rounded-xl border border-line bg-surface-2 px-3 py-2.5 outline-none focus:border-accent" />}
-        {position.unstaked > 0n && !position.canWithdraw && (
-          <Banner tone="warn" title="This restarts your unbonding timer">
-            {formatNear(position.unstaked)} is already unbonding here. A new unstake makes all of it wait 4 more epochs (~21–28 h from now). Usually better: wait until it unlocks, withdraw it,
-            then unstake.
-            <label className="mt-2 flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={allowTimerReset}
-                onChange={(e) => {
-                  setAllowTimerReset(e.target.checked);
-                  setQ(null);
-                }}
-                className="mt-1 accent-[var(--accent)]"
-              />
-              <span>Restart the wait for the {formatNear(position.unstaked, 3)} too</span>
-            </label>
-          </Banner>
-        )}
-        {position.unstaked > 0n && position.canWithdraw && (
-          <Banner tone="accent" title="Your unlocked NEAR is withdrawn first">
-            {formatNear(position.unstaked)} is ready: it is withdrawn in the same transaction, so it doesn&apos;t lock again.
-          </Banner>
-        )}
-        {q && (
-          <>
-            <TxPreview transactions={q.transactions} />
-            <Rows>
-              <Row label="Unstaking">{formatNear(q.amount)}</Row>
-              {q.withdrawsFirst > 0n && <Row label="Withdrawn first">{formatNear(q.withdrawsFirst)}</Row>}
-              <Row label="Unlocks">
-                epoch {q.unlock.earliestEpoch.toString()}
-                {q.unlock.latestEpoch !== null ? `–${q.unlock.latestEpoch.toString()}` : "+"}
-                <span className="block text-xs text-muted">
-                  {dateTime(q.unlock.earliestAt)}
-                  {q.unlock.latestAt ? ` – ${dateTime(q.unlock.latestAt)}` : ""}
-                </span>
-              </Row>
-              <Row label="Network fee" hint={`${formatNear(q.upfront, 4)} held back for gas while it runs, refunded`}>at most {formatNear(q.fee, 5)}</Row>
-            </Rows>
-            {q.warnings.map((w) => (
-              <p key={w.code} className="text-sm text-warn">
-                {w.message}
-              </p>
-            ))}
-          </>
-        )}
-        {err && <p className="text-sm text-danger">{err}</p>}
-        {hash ? (
-          <Banner tone="accent" title="Unstake sent">
-            <TxLink chain="near:mainnet" hash={hash} />
-          </Banner>
-        ) : (
-          <div className="grid grid-cols-2 gap-2">
-            <button type="button" onClick={() => void preflight()} disabled={busy} className="btn-tactile justify-center px-4 py-2.5 text-sm font-medium">
-              {busy && !q ? <Spinner /> : "Preflight"}
-            </button>
-            <button type="button" onClick={() => void sign()} disabled={busy || !q || readOnly} title={readOnly ? "Read-only demo account" : undefined} className="btn-tactile-accent justify-center px-4 py-2.5 text-sm">
-              Sign unstake
-            </button>
-          </div>
-        )}
-      </div>
-    </Modal>
+  // getStakedBalance, not listPositions: when the pool lookup is down it still shows the known pools and says so
+  const balance = useAsync(on ? () => s.native.getStakedBalance() : null, [s, on], 60_000);
+  const liquidAcct = useAsync(
+    on ? () => Promise.all(LIQUID_OPTIONS.map((o) => settle(Promise.all([s.liquid[o.id].getAccountDetails(), s.liquid[o.id].getWithdrawalRequests()])))) : null,
+    [s, on],
+    60_000,
   );
-}
+  const liquidPool = useAsync(() => Promise.all(LIQUID_OPTIONS.map((o) => settle(s.liquid[o.id].getPoolInfo()))), [s], 60_000);
+  const liquidApr = useAsync(() => Promise.all(LIQUID_OPTIONS.map((o) => s.liquid[o.id].getApr().catch(() => null))), [s]);
+  const stats = useAsync(() => network.getNetworkStats(), [network]);
+  const price = useAsync(() => listTokens().then((ts) => ts.find((t) => t.assetId === "nep141:wrap.near")?.price ?? null), []).data ?? null;
+  const spendable = useAsync(mode === "mine" ? () => nearSpendable(account) : null, [account, mode], 30_000);
 
-function ClaimAll({ native, readOnly, positions, onDone, account }: { native: NativeStaking; readOnly: boolean; positions: NearPoolPosition[]; onDone: () => void; account: string }) {
-  const ready = positions.filter((p) => p.withdrawable > 0n);
-  const [open, setOpen] = useState(false);
-  const [q, setQ] = useState<NearClaimQuote | null>(null);
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [hashes, setHashes] = useState<string[]>([]);
-  const locked = positions.filter((p) => p.unstaked > 0n && !p.canWithdraw);
+  const reloadBalance = balance.reload;
+  const reloadLiquid = liquidAcct.reload;
+  const reloadSpendable = spendable.reload;
+  const onNativeDone = useCallback(() => {
+    reloadBalance();
+    reloadSpendable();
+  }, [reloadBalance, reloadSpendable]);
+  const onLiquidDone = useCallback(() => {
+    reloadLiquid();
+    reloadSpendable();
+  }, [reloadLiquid, reloadSpendable]);
 
-  const preflight = async () => {
-    setErr("");
-    setBusy(true);
-    try {
-      setQ(await native.quoteClaimWithdrawals());
-    } catch (e) {
-      setErr(stakingErrorText(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-  if (!ready.length && !locked.length) return null;
+  // per preset: the position (account + pool reads), or why it couldn't be read
+  const liquid = LIQUID_OPTIONS.map((o, i) => {
+    const a = liquidAcct.data?.[i];
+    const p = liquidPool.data?.[i];
+    const apr = liquidApr.data?.[i] ?? null;
+    if (!a || !p) return { id: o.id, label: o.label, apr, state: "loading" as const };
+    if (!a.ok || !p.ok) return { id: o.id, label: o.label, apr, state: "error" as const, error: !a.ok ? a.error : !p.ok ? p.error : "" };
+    const data: LiquidData = { details: a.value[0], request: a.value[1].requests[0], info: p.value };
+    return { id: o.id, label: o.label, apr, state: "ok" as const, data };
+  });
+
+  const native = (balance.data?.positions ?? []).filter((p) => p.staked >= UNSTAKED_DUST || p.unstaked >= UNSTAKED_DUST);
+  const held = liquid.filter((l) => l.state === "ok" && (l.data.details.shares > 0n || l.data.request));
+  const loaded = on && balance.data !== undefined && liquidAcct.data !== undefined && liquidPool.data !== undefined;
+  const holdings: Holding[] = [
+    // rounding dust left in a pool after an unstake is not stake
+    ...native.map((p) => ({ staked: p.staked >= UNSTAKED_DUST ? p.staked : 0n, unstaking: p.unstaked >= UNSTAKED_DUST && !p.canWithdraw ? p.unstaked : 0n, ready: p.withdrawable, apr: p.poolInfo?.apr ?? null })),
+    ...held.flatMap((l) => (l.state === "ok" ? [{ ...liquidHolding(l.data), staked: l.data.details.value, apr: l.apr }] : [])),
+  ];
+  const sum = summarize(holdings);
+  const unlocks = [...native.map((p) => p.unlock), ...held.map((l) => (l.state === "ok" ? l.data.request?.unlock : null))].filter((u): u is UnlockEstimate => !!u).map((u) => u.at ?? u.earliestAt);
+  const soonest = unlocks.length ? Math.min(...unlocks) : null;
+  const count = native.length + held.length;
+
   return (
     <>
-      <button
-        type="button"
-        onClick={() => {
-          setOpen(true);
-          void preflight();
-        }}
-        className={ready.length ? "btn-tactile-accent px-3.5 py-2 text-sm" : "btn-tactile px-3.5 py-2 text-sm font-medium"}>
-        {ready.length ? `Withdraw ${formatNear(ready.reduce((s, p) => s + p.withdrawable, 0n), 3)}` : "Withdraw"}
-      </button>
-      {open && (
-        <Modal title="Withdraw unstaked NEAR" onClose={() => setOpen(false)}>
-          <div className="flex flex-col gap-3">
-            {busy && !q && <Spinner />}
-            {q && (
-              <>
-                <TxPreview transactions={q.transactions} />
-                <Rows>
-                  <Row label="To your account">{formatNear(q.amount)}</Row>
-                  <Row label="Network fee" hint={`${formatNear(q.upfront, 4)} held back for gas while it runs, refunded`}>at most {formatNear(q.fee, 5)}</Row>
-                </Rows>
-              </>
-            )}
-            {err && <Banner tone="warn" title="Not withdrawable yet">{err}</Banner>}
-            {hashes.length ? (
-              <Banner tone="accent" title="Withdrawn">
-                {hashes.map((h) => (
-                  <TxLink key={h} chain="near:mainnet" hash={h} />
-                ))}{" "}
-                Next: send it to any chain below.
-              </Banner>
-            ) : (
-              <button
-                type="button"
-                disabled={!q || readOnly || busy}
-                onClick={async () => {
-                  if (!q) return;
-                  setBusy(true);
-                  try {
-                    const r = await native.claimWithdrawals({ expected: q.transactions });
-                    setHashes(r.hashes);
-                    addRecord({ id: newId(), type: "action", kind: "claim", createdAt: Date.now(), account, target: q.claims.map((c) => c.pool).join(", "), amount: q.amount.toString(), txs: r.hashes.map((h) => ({ chain: "near:mainnet", hash: h, label: "Withdraw" })) });
-                    onDone();
-                  } catch (e) {
-                    setErr(stakingErrorText(e));
-                  } finally {
-                    setBusy(false);
-                  }
-                }}
-                className="btn-tactile-accent justify-center px-4 py-2.5 text-sm"
-              >
-                {readOnly ? "Read-only demo account" : q && q.transactions.length > 1 ? `Sign ${q.transactions.length} withdrawals (one prompt)` : "Sign withdrawal"}
-              </button>
-            )}
+      {mode === "connect" ? <ConnectHero /> : mode === "restoring" ? <Skeleton className="h-64 w-full rounded-3xl" /> : (
+        <section aria-labelledby="total-h" className="rounded-3xl border border-line bg-panel p-5 sm:p-8">
+          <div className="flex flex-wrap items-end justify-between gap-6">
+            <div className="min-w-0">
+              <h2 id="total-h" className="text-sm font-medium text-muted">
+                Total staked{mode === "demo" && <span className="font-normal"> · {shortAccount(account)}</span>}
+              </h2>
+              {balance.error ? (
+                <p className="mt-2 text-4xl font-semibold text-muted">—</p>
+              ) : !loaded ? (
+                <Skeleton className="mt-3 h-[4.5rem] w-60 max-w-full" />
+              ) : (
+                <p className="mt-2 flex flex-wrap items-baseline gap-x-3 font-semibold tabular-nums">
+                  <span className="text-[length:clamp(2.5rem,7vw,4rem)] leading-[1.15] tracking-[-0.03em]">{heroAmount(sum.staked)}</span>
+                  <span className="text-[28px] font-medium leading-9 text-muted">NEAR</span>
+                </p>
+              )}
+              {loaded && <HeroLine staked={sum.staked} yearly={sum.yearly} apr={sum.apr} partialApr={sum.aprPartial} price={price} moving={sum.unstaking + sum.ready > 0n} />}
+              {balance.data?.partial && <p className="mt-1 text-sm text-warn">Known pools only: the pool lookup is down right now.</p>}
+            </div>
+            <Link href="/stake" className="btn-tactile-accent h-14 w-full justify-center px-7 text-base sm:w-auto">
+              <PlusIcon size={20} />
+              {mode === "mine" && sum.staked > 0n ? "Stake more" : "Stake NEAR"}
+            </Link>
           </div>
-        </Modal>
+          <div className="mt-6 grid grid-cols-[repeat(auto-fit,minmax(min(100%,140px),1fr))] gap-x-4 gap-y-5 border-t border-line pt-6 sm:mt-8 sm:grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] sm:gap-6">
+            <EpochClock compact label={sum.staked > 0n ? "Next reward" : "Next epoch"} />
+            <Cell
+              label="Unstaking"
+              value={loaded ? (sum.unstaking > 0n ? formatNear(sum.unstaking) : "None") : undefined}
+              quiet={sum.unstaking === 0n}
+              hint={
+                sum.unstaking > 0n
+                  ? soonest !== null && soonest > now
+                    ? `First unlock in ${duration(soonest - now)}`
+                    : "Unlocks at the next epoch boundary"
+                  : `Takes about ${epoch ? `${Math.max(1, Math.round((unbondingWindow(epoch).at - now) / 3_600_000))} h` : "21–28 h"} once you start`
+              }
+            />
+            <Cell
+              label="Ready to withdraw"
+              value={loaded ? (sum.ready > 0n ? formatNear(sum.ready) : "None") : undefined}
+              quiet={sum.ready === 0n}
+              accent={sum.ready > 0n}
+              hint={sum.ready > 0n ? "Withdraw it from the position below" : "Unlocked NEAR shows up here"}
+            />
+          </div>
+        </section>
       )}
+
+      <div className="grid items-start gap-x-6 gap-y-10 lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)] lg:grid-rows-[auto_1fr]">
+        {on && (
+          <section aria-labelledby="pos-h" className="min-w-0 lg:col-start-1 lg:row-start-1">
+            <div className="mb-2 flex min-h-11 items-center justify-between gap-4">
+              <h2 id="pos-h" className="text-xl font-semibold">
+                Your positions
+              </h2>
+              {loaded && <span className="text-sm text-muted">{count === 1 ? "1 position" : `${count} positions`}</span>}
+            </div>
+            <div className="flex flex-col gap-4">
+              {balance.error && <Banner tone="danger" title="Couldn't read your stake">{balance.error}</Banner>}
+              {balance.data?.partial && (
+                <Banner tone="warn" title="Pool lookup is down">
+                  fastnear&apos;s index didn&apos;t answer, so only pools this app already knows are shown. Stake elsewhere is safe; it shows up again once the lookup is back.
+                </Banner>
+              )}
+              {!loaded && !balance.error && <Skeleton className="h-72 w-full rounded-[20px]" />}
+              {loaded && count === 0 && !balance.error && (
+                <div className="rounded-[20px] border border-dashed border-line px-6 py-8 text-center">
+                  <p className="font-medium">Nothing staked on {shortAccount(account)} yet</p>
+                  <p className="mt-1 text-sm text-muted">Pay with USDC, SOL, ETH or 40+ other tokens; one signature stakes the NEAR that arrives.</p>
+                </div>
+              )}
+              {loaded &&
+                native.map((p) => (
+                  <NativePositionCard key={p.pool} p={p} native={s.native} readOnly={s.readOnly} account={account} epoch={epoch} price={price} onDone={onNativeDone} />
+                ))}
+              {loaded &&
+                held.map((l) =>
+                  l.state === "ok" ? (
+                    <LiquidPositionCard key={l.id} preset={l.id as LiquidPreset} ls={s.liquid[l.id]} data={l.data} apr={l.apr} readOnly={s.readOnly} account={account} epoch={epoch} price={price} onDone={onLiquidDone} />
+                  ) : null,
+                )}
+              {/* a balance that couldn't be read is said so, never silently left out */}
+              {liquid.map((l) =>
+                l.state === "error" ? (
+                  <p key={l.id} className="text-sm text-muted">
+                    {l.label}: couldn&apos;t read this account&apos;s balance right now ({l.error}).
+                  </p>
+                ) : null,
+              )}
+            </div>
+          </section>
+        )}
+
+        <aside aria-label="Your account and rates" className="flex min-w-0 flex-col gap-6 lg:col-start-2 lg:row-span-2 lg:row-start-1">
+          {mode === "mine" && <Available spendable={spendable.data} error={spendable.error} price={price} onCashOutState={reloadSpendable} />}
+          <Rates title={sum.staked > 0n ? "Other ways to earn" : "Ways to earn"} nativeApr={stats.data?.apr} nativeError={!!stats.error} epoch={epoch} now={now} liquid={liquid.map((l, i) => ({ id: l.id, apr: l.apr, aprLoading: liquidApr.data === undefined, price: liquidPool.data?.[i]?.ok ? liquidPool.data[i].value.price : undefined }))} />
+        </aside>
+
+        <div className={`min-w-0 lg:col-start-1 ${on ? "lg:row-start-2" : "lg:row-start-1"}`}>{activity}</div>
+      </div>
     </>
   );
 }
 
-function LiquidCard({ preset, ls, readOnly, account }: { preset: LiquidPreset; ls: LiquidStaking; readOnly: boolean; account: string }) {
-  const o = LIQUID_OPTIONS.find((x) => x.id === preset)!;
-  const data = useAsync(() => Promise.all([ls.getAccountDetails(), ls.getWithdrawalRequests(), ls.getPoolInfo()]), [ls], 60_000);
-  const [modal, setModal] = useState<"unstake" | "claim" | null>(null);
-  if (data.error) return <div className="rounded-2xl border border-line bg-surface p-4 text-sm text-muted">{o.label}: {data.error}</div>;
-  if (!data.data) return <Skeleton className="h-40 w-full" />;
-  const [d, w, info] = data.data;
-  const req = w.requests[0];
+function HeroLine({ staked, yearly, apr, partialApr, price, moving }: { staked: bigint; yearly: bigint | null; apr: number | null; partialApr: boolean; price: number | null; moving: boolean }) {
+  if (staked === 0n) return <p className="mt-2 text-base text-muted">{moving ? "Nothing earning right now." : "Nothing staked yet."}</p>;
+  const usd = usdText(staked, price);
   return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <p className="font-medium">{o.label}</p>
-          <p className="text-xs text-muted">{o.contract}</p>
-        </div>
-        {info.paused ? <Pill tone="danger">paused</Pill> : !info.codeHashKnown ? <Pill tone="danger">unknown code</Pill> : <Pill tone="liquid">1 {o.symbol} = {formatUnits(info.price, 24, 4)} NEAR</Pill>}
-      </div>
-      <Rows>
-        <Row label="Balance">
-          {formatUnits(d.shares, 24, 4)} {o.symbol}
-          <span className="block text-xs text-muted">≈ {formatNear(d.value)}</span>
-        </Row>
-        <Row label="Unstaked">{formatNear(d.unstaked)}</Row>
-      </Rows>
-      {req && req.unlock && <UnlockLine u={req.unlock} />}
-      {req?.awaitingLiquidity && <p className="text-sm text-warn">Unlocked, waiting for the protocol&apos;s payout (the contract refills after its epoch bot runs).</p>}
-      <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={() => setModal("unstake")} disabled={d.shares === 0n} className="btn-tactile px-3.5 py-2 text-sm font-medium">
-          Unstake
-        </button>
-        <button type="button" onClick={() => setModal("claim")} disabled={!req} className={req?.claimable ? "btn-tactile-accent px-3.5 py-2 text-sm" : "btn-tactile px-3.5 py-2 text-sm font-medium"}>
-          Withdraw
-        </button>
-      </div>
-      {modal && <LiquidModal kind={modal} ls={ls} symbol={o.symbol} shares={d.shares} readOnly={readOnly} account={account} onClose={() => setModal(null)} onDone={data.reload} />}
+    <p className="mt-2 text-base text-muted">
+      {usd}
+      {usd && yearly !== null && (
+        <span aria-hidden className="mx-2">
+          ·
+        </span>
+      )}
+      {yearly !== null && (
+        <>
+          <span className="font-medium text-accent">+≈{smallNear(yearly)} / year</span> at {partialApr ? "about " : ""}
+          {percent(apr)} APR
+        </>
+      )}
+    </p>
+  );
+}
+
+function Cell({ label, value, hint, quiet = false, accent = false }: { label: string; value: string | undefined; hint: string; quiet?: boolean; accent?: boolean }) {
+  return (
+    <div>
+      <p className="flex min-h-6 items-center text-[13px] text-muted">{label}</p>
+      {value === undefined ? <Skeleton className="mt-1 h-7 w-28" /> : <p className={`mt-1 text-lg font-semibold tabular-nums sm:text-xl ${quiet ? "text-muted" : accent ? "text-accent" : ""}`}>{value}</p>}
+      <p className="mt-1 text-[13px] text-muted">{hint}</p>
     </div>
   );
 }
 
-function LiquidModal({ kind, ls, symbol, shares, readOnly, account, onClose, onDone }: { kind: "unstake" | "claim"; ls: LiquidStaking; symbol: string; shares: bigint; readOnly: boolean; account: string; onClose: () => void; onDone: () => void }) {
-  const [q, setQ] = useState<LiquidUnstakeQuote | LiquidClaimQuote | null>(null);
-  const [err, setErr] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [hash, setHash] = useState("");
-  // set only after the module refused a timer reset and the user agreed to it
-  const [allowTimerReset, setAllowTimerReset] = useState(false);
-  const [resetRefused, setResetRefused] = useState(false);
-  useEffect(() => {
-    (kind === "unstake" ? ls.quoteRequestWithdrawal({ amount: "all", allowTimerReset }) : ls.quoteClaimWithdrawals()).then(setQ, (e: unknown) => {
-      setResetRefused((e as { code?: string })?.code === "timer-reset-refused");
-      setErr(stakingErrorText(e));
-    });
-  }, [kind, ls, allowTimerReset]);
-  const sign = async () => {
-    if (!q) return;
-    setBusy(true);
-    try {
-      const r = kind === "unstake" ? await ls.requestWithdrawal({ amount: "all", allowTimerReset, expected: q.transactions }) : await ls.claimWithdrawals({ expected: q.transactions });
-      setHash(r.hash);
-      addRecord({ id: newId(), type: "action", kind: kind === "unstake" ? "unstake" : "claim", createdAt: Date.now(), account, target: symbol, amount: q.amount.toString(), txs: [{ chain: "near:mainnet", hash: r.hash, label: kind }] });
-      onDone();
-    } catch (e) {
-      setErr(stakingErrorText(e));
-    } finally {
-      setBusy(false);
-    }
-  };
+function ConnectHero() {
+  const { connectNear, connecting } = useApp();
   return (
-    <Modal title={kind === "unstake" ? `Unstake all ${symbol}` : `Withdraw from ${symbol}`} onClose={onClose}>
-      <div className="flex flex-col gap-3">
-        {kind === "unstake" && <p className="text-sm text-muted">Burns {formatUnits(shares, 24, 4)} {symbol}. Unlocks in at least 4 epochs (≈ 21–35 h or more); the contract may add more. The exact epoch shows here after the unstake.</p>}
-        {!q && !err && <Spinner />}
-        {q && (
-          <>
-            <TxPreview transactions={q.transactions} />
-            <Rows>
-              <Row label={kind === "unstake" ? "NEAR unstaking" : "To your account"}>{formatNear(q.amount)}</Row>
-              <Row label="Network fee" hint={`${formatNear(q.upfront, 4)} held back for gas while it runs, refunded`}>at most {formatNear(q.fee, 5)}</Row>
-            </Rows>
-            {"warnings" in q && q.warnings.map((w) => <p key={w.code} className="text-sm text-warn">{w.message}</p>)}
-          </>
-        )}
-        {err && <Banner tone="warn">{err}</Banner>}
-        {kind === "unstake" && resetRefused && !allowTimerReset && (
-          <label className="flex items-start gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={allowTimerReset}
-              onChange={(e) => {
-                setErr("");
-                setQ(null);
-                setAllowTimerReset(e.target.checked);
-              }}
-              className="mt-1 accent-[var(--accent)]"
-            />
-            <span>Unstake anyway and restart the wait for what is already unbonding</span>
-          </label>
-        )}
-        {hash ? (
-          <Banner tone="accent" title="Sent">
-            <TxLink chain="near:mainnet" hash={hash} />
-          </Banner>
-        ) : (
-          <button type="button" onClick={() => void sign()} disabled={!q || readOnly || busy} className="btn-tactile-accent justify-center px-4 py-2.5 text-sm">
-            {readOnly ? "Read-only demo account" : busy ? "Confirm in your wallet…" : "Sign"}
+    <section aria-labelledby="connect-h" className="rounded-3xl border border-line bg-panel p-5 sm:p-8">
+      <div className="flex flex-wrap items-end justify-between gap-6">
+        <div className="min-w-0 max-w-2xl">
+          <p className="text-sm font-medium text-muted">Total staked</p>
+          <h2 id="connect-h" className="mt-2 text-2xl font-semibold sm:text-3xl">
+            Connect a NEAR wallet to see your stake
+          </h2>
+          <p className="mt-2 text-muted">Positions, unstaking countdowns and the NEAR on your account show up here.</p>
+        </div>
+        <div className="flex w-full flex-col gap-1 sm:w-auto sm:items-end">
+          <button type="button" onClick={() => void connectNear()} disabled={connecting} className="btn-tactile-accent h-14 justify-center px-7 text-base">
+            {connecting ? "Connecting…" : "Connect NEAR wallet"}
           </button>
-        )}
+          <Link href="/portfolio?view=demo" className="inline-flex min-h-11 items-center justify-center text-sm font-medium text-accent hover:underline">
+            View a demo account
+          </Link>
+        </div>
       </div>
-    </Modal>
+    </section>
+  );
+}
+
+/** The NEAR on the account that is not staked, why it is there, and the way out to any chain. */
+function Available({ spendable, error, price, onCashOutState }: { spendable: bigint | undefined; error: string; price: number | null; onCashOutState: () => void }) {
+  const [open, setOpen] = useState(false);
+  // a sent cash-out stays mounted (hidden) while 1Click works, so its status keeps updating
+  const [inFlight, setInFlight] = useState(false);
+  const onInFlight = useCallback(
+    (v: boolean) => {
+      setInFlight(v);
+      if (!v) onCashOutState();
+    },
+    [onCashOutState],
+  );
+  const usd = spendable !== undefined ? usdText(spendable, price) : null;
+  return (
+    <section aria-labelledby="avail-h" className="rounded-[20px] border border-line bg-panel p-6">
+      <h2 id="avail-h" className="text-sm font-medium text-muted">
+        Available on your account
+      </h2>
+      {spendable !== undefined ? (
+        <p className="mt-2 text-[28px] font-semibold leading-9 tabular-nums">{formatNear(spendable)}</p>
+      ) : error ? (
+        <p className="mt-2 text-sm text-muted">Couldn&apos;t read the balance right now.</p>
+      ) : (
+        <Skeleton className="mt-2 h-9 w-36" />
+      )}
+      {spendable !== undefined && <p className="mt-1 text-sm text-muted">{usd ? `${usd} · not staked` : "Not staked"}</p>}
+      <p className="mt-4 text-sm text-muted">
+        {spendable === undefined || spendable <= RESERVE_LIKE
+          ? "Kept back when you staked: a gas reserve so you can unstake later, plus gas refunded after the stake. Yours to use any time."
+          : `Not staked, so it isn't earning. Yours to use any time; a cash-out keeps ${formatNear(DEFAULT_RESERVE, 2)} for the gas of a later unstake.`}
+      </p>
+      <button type="button" onClick={() => setOpen(true)} disabled={spendable === 0n && !inFlight} className="btn-tactile mt-5 min-h-11 w-full justify-center px-5 text-[15px] font-medium">
+        {inFlight && !open ? "Cash-out on its way: show it" : "Cash out to any chain"}
+        <ArrowRightIcon />
+      </button>
+      {(open || inFlight) && (
+        <Modal title="Cash out to any chain" open={open} onClose={() => setOpen(false)} wide>
+          <WithdrawOut onInFlight={onInFlight} />
+        </Modal>
+      )}
+    </section>
+  );
+}
+
+function Rates({
+  title,
+  nativeApr,
+  nativeError,
+  epoch,
+  now,
+  liquid,
+}: {
+  title: string;
+  nativeApr: number | undefined;
+  nativeError: boolean;
+  epoch: NearEpoch | undefined;
+  now: number;
+  liquid: { id: LiquidPreset; apr: number | null; aprLoading: boolean; price: bigint | undefined }[];
+}) {
+  const h = epoch ? Math.max(1, Math.round((unbondingWindow(epoch).at - now) / 3_600_000)) : null;
+  const rate = (v: number | null | undefined, loading: boolean) => (v !== null && v !== undefined ? percent(v) : loading ? <Skeleton className="ml-auto h-5 w-12" /> : "—");
+  const rows: { key: string; disc: string; discClass: string; name: string; hint: ReactNode; rate: ReactNode; basis: string }[] = [
+    { key: "native", disc: "N", discClass: "bg-accent", name: "Validator pools", hint: `Native · ${h !== null ? `~${h} h` : "21–28 h"} to unlock`, rate: rate(nativeApr, !nativeError), basis: "before pool fee" },
+    ...liquid.map((l) => {
+      const o = LIQUID_OPTIONS.find((x) => x.id === l.id)!;
+      return {
+        key: l.id,
+        disc: l.id === "rnear" ? "r" : "Li",
+        discClass: "bg-liquid",
+        name: l.id === "rnear" ? "rNEAR by Rhea" : "LiNEAR",
+        hint: <span className="font-mono text-xs">{l.price !== undefined ? `1 ${o.symbol} = ${formatUnits(l.price, 24, 4)} NEAR` : `${o.symbol} token`}</span>,
+        rate: rate(l.apr, l.aprLoading),
+        basis: "last 7 days",
+      };
+    }),
+  ];
+  return (
+    <section aria-labelledby="rates-h" className="rounded-[20px] border border-line bg-panel px-6 pb-4 pt-6">
+      <h2 id="rates-h" className="text-base font-semibold">
+        {title}
+      </h2>
+      <p className="mt-1 text-[13px] text-muted">Today&apos;s rates. Pick one when you stake.</p>
+      <ul className="mt-4">
+        {rows.map((r) => (
+          <li key={r.key} className="border-t border-line">
+            <Link href="/stake" className="-mx-2 flex items-center gap-3 rounded-[14px] px-2 py-3 transition-colors hover:bg-surface">
+              <span aria-hidden className={`grid size-9 shrink-0 place-items-center rounded-full text-[13px] font-bold text-accent-ink ${r.discClass}`}>
+                {r.disc}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[15px] font-medium leading-[22px]">{r.name}</span>
+                <span className="block text-[13px] leading-5 text-muted">{r.hint}</span>
+              </span>
+              <span className="shrink-0 text-right">
+                <span className="block text-[15px] font-semibold leading-[22px] tabular-nums">{r.rate}</span>
+                <span className="block text-xs leading-5 text-muted">{r.basis}</span>
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+      <p className="mb-2 mt-2 border-t border-line pt-3 text-[13px] text-muted">rNEAR and LiNEAR are tokens: swap them any time instead of waiting for an unlock.</p>
+    </section>
   );
 }
 

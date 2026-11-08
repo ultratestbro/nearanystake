@@ -9,14 +9,15 @@ import { buildOutboundQuoteRequest, payCutoffMs, quoteDeadline } from "@/lib/one
 import { isFinal, phaseOf } from "@/lib/oneclick/status";
 import type { QuoteResponse, StatusResponse } from "@/lib/oneclick/types";
 import { connectPayer, PAYER_LABEL } from "@/lib/pay";
-import { clock, formatNear, formatUnits, parseUnits, shortAccount } from "@/lib/format";
+import { clock, formatNear, formatUnits, parseUnits, plainUnits, shortAccount } from "@/lib/format";
 import { DEFAULT_RESERVE, upfrontGas } from "@/lib/staking";
 import { useAsync, useNow } from "@/lib/useAsync";
 import { useApp } from "./AppProvider";
 import { PayWithSheet } from "./PayWithSheet";
 import { TxLink } from "./TxLink";
 import { TxPreview } from "./TxPreview";
-import { Banner, Icon, Panel, Row, Rows } from "./ui";
+import { ChevronDownIcon } from "./icons";
+import { Banner, Icon, Row, Rows } from "./ui";
 
 const WNEAR = "wrap.near";
 const STORAGE = 1_250_000_000_000_000_000_000n; // 0.00125 NEAR: NEP-145 registration on wrap.near (refunded if already registered)
@@ -50,8 +51,12 @@ async function sendable(account: string): Promise<bigint> {
   return max > 0n ? max : 0n;
 }
 
-/** "Withdraw to any chain": NEAR on the account → 1Click → a token on another chain, to the user's own address. */
-export function WithdrawOut() {
+/**
+ * "Cash out to any chain": NEAR on the account → 1Click → a token on another chain, to the user's own
+ * address. Shown in a dialog; `onInFlight` says when a deposit is being signed or 1Click is still
+ * working on a sent one, so the dialog can stay mounted (hidden) and keep tracking it.
+ */
+export function WithdrawOut({ onInFlight }: { onInFlight?: (inFlight: boolean) => void } = {}) {
   const { near, dryRun } = useApp();
   const account = near!.accountId;
   const bal = useAsync(() => sendable(account), [account], 30_000);
@@ -74,6 +79,10 @@ export function WithdrawOut() {
   const phase = phaseOf(status, { deadlineMs: deadline, now });
   const cutoff = payCutoffMs("near:mainnet");
   const sent = !!hash;
+  const inFlight = (sent && !isFinal(phase)) || (busy && !!quote && !sent);
+  useEffect(() => {
+    onInFlight?.(inFlight);
+  }, [inFlight, onInFlight]);
 
   // any edit makes the quote stale: drop it (after sending, the inputs are locked instead)
   const edit = <T,>(set: (v: T) => void) => (v: T) => {
@@ -164,46 +173,58 @@ export function WithdrawOut() {
   };
 
   const live = quote && !quote.res.quoteRequest.dry && !dryRun ? quote.res : null;
+  const field = "min-h-11 rounded-xl border border-line bg-surface-2 px-3 py-2.5 outline-none focus:border-accent disabled:opacity-60";
   return (
-    <Panel className="flex flex-col gap-4 p-4 sm:p-6">
-      <div>
-        <h2 className="text-lg font-semibold">Withdraw to any chain</h2>
-        <p className="text-sm text-muted">After a withdrawal, send the NEAR on {shortAccount(account)} to a token on another chain: NEAR → NEAR Intents → your wallet there.</p>
-      </div>
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted">
+        Send NEAR from <span className="font-mono text-text">{shortAccount(account)}</span> to a token on another chain. NEAR Intents swaps it and delivers it to your own
+        wallet there; a refund comes back to {shortAccount(account)}.
+      </p>
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="flex flex-col gap-1.5">
-          <span className="text-sm text-muted">NEAR to send · {bal.data !== undefined ? `${formatNear(spendable > 0n ? spendable : 0n, 3)} available` : "…"}</span>
-          <input value={text} onChange={(e) => edit(setText)(e.target.value)} disabled={sent} inputMode="decimal" placeholder="0.0" className="rounded-xl border border-line bg-surface-2 px-3 py-2.5 outline-none focus:border-accent" />
-        </label>
         <div className="flex flex-col gap-1.5">
-          <span className="text-sm text-muted">Receive</span>
-          <button type="button" onClick={() => setSheet(true)} disabled={sent} className="btn-tactile justify-between px-3 py-2.5 text-left">
-            <span className="flex items-center gap-2">
+          <div className="flex min-h-6 items-center justify-between gap-2 text-sm text-muted">
+            <label htmlFor="cashout-amount">NEAR to send</label>
+            {bal.data !== undefined ? (
+              <button type="button" onClick={() => edit(setText)(plainUnits(spendable, 24, 6))} disabled={sent || spendable === 0n} className="rounded-md px-1 text-[13px] text-accent hover:underline disabled:text-muted disabled:no-underline">
+                {formatNear(spendable, 3)} available
+              </button>
+            ) : (
+              <span>…</span>
+            )}
+          </div>
+          <input id="cashout-amount" value={text} onChange={(e) => edit(setText)(e.target.value)} disabled={sent} inputMode="decimal" placeholder="0.0" className={field} />
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <span id="cashout-receive" className="flex min-h-6 items-center text-sm text-muted">
+            Receive
+          </span>
+          <button type="button" aria-labelledby="cashout-receive cashout-token" onClick={() => setSheet(true)} disabled={sent} className="btn-tactile min-h-11 justify-between px-3 py-2.5 text-left">
+            <span id="cashout-token" className="flex min-w-0 items-center gap-2">
               {dest && <Icon src={dest.icon} alt="" size={22} />}
-              {dest ? `${dest.symbol} on ${dest.chainLabel}` : "Pick a token"}
+              <span className="truncate">{dest ? `${dest.symbol} on ${dest.chainLabel}` : "Pick a token"}</span>
             </span>
-            <span className="text-xs text-muted">Change</span>
+            <ChevronDownIcon className="text-muted" />
           </button>
         </div>
       </div>
       <label className="flex flex-col gap-1.5">
         <span className="text-sm text-muted">Your address on {dest?.chainLabel}</span>
-        <input value={recipient} onChange={(e) => edit(setRecipient)(e.target.value)} disabled={sent} spellCheck={false} className="rounded-xl border border-line bg-surface-2 px-3 py-2.5 font-mono text-sm outline-none focus:border-accent" />
+        <input value={recipient} onChange={(e) => edit(setRecipient)(e.target.value)} disabled={sent} spellCheck={false} autoComplete="off" className={`${field} font-mono text-sm`} />
       </label>
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {dest?.family && (
-          <button type="button" onClick={() => void fromWallet()} className="btn-tactile px-3.5 py-2 text-sm font-medium">
+          <button type="button" onClick={() => void fromWallet()} disabled={sent} className="btn-tactile min-h-11 px-4 text-sm font-medium">
             Use my {PAYER_LABEL[dest.family]}
           </button>
         )}
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={own} onChange={(e) => edit(setOwn)(e.target.checked)} disabled={sent} className="accent-[var(--accent)]" />
+        <label className="flex min-h-11 items-center gap-2 text-sm">
+          <input type="checkbox" checked={own} onChange={(e) => edit(setOwn)(e.target.checked)} disabled={sent} className="size-4 accent-[var(--accent)]" />
           This is my own wallet (not an exchange)
         </label>
       </div>
       {err && <Banner tone="danger">{err}</Banner>}
-      <button type="button" onClick={() => void getQuote()} disabled={busy || sent} className="btn-tactile-accent justify-center px-4 py-3">
-        {busy && !quote ? "Getting a quote…" : dryRun ? "Get a dry-run quote" : "Get quote"}
+      <button type="button" onClick={() => void getQuote()} disabled={busy || sent} className={`${quote ? "btn-tactile font-medium" : "btn-tactile-accent"} min-h-12 justify-center px-4`}>
+        {busy && !quote ? "Getting a quote…" : quote ? "Get a new quote" : dryRun ? "Get a dry-run quote" : "Get quote"}
       </button>
       {quote && (
         <Rows>
@@ -221,11 +242,15 @@ export function WithdrawOut() {
           {deadline !== null && <Row label="Deadline">{deadline > now ? clock(deadline - now) : "passed"}</Row>}
         </Rows>
       )}
-      {quote && quote.res.quoteRequest.dry && <Banner tone="warn" title="Dry run">This quote can&apos;t be paid. Switch to Live to get a deposit address.</Banner>}
+      {quote && quote.res.quoteRequest.dry && (
+        <Banner tone="warn" title="Dry run">
+          This quote can&apos;t be paid. Switch to Live to get a deposit address.
+        </Banner>
+      )}
       {live && !hash && (
         <>
           <TxPreview transactions={[outboundDepositTx(account, live.quote.depositAddress!, BigInt(live.quote.amountIn))]} />
-          <button type="button" onClick={() => void send()} disabled={busy || (deadline !== null && deadline - now <= cutoff)} className="btn-tactile-accent justify-center px-4 py-3">
+          <button type="button" onClick={() => void send()} disabled={busy || (deadline !== null && deadline - now <= cutoff)} className="btn-tactile-accent min-h-12 justify-center px-4">
             {busy ? "Confirm in your wallet…" : deadline !== null && deadline - now <= cutoff ? "Too close to the deadline: get a new quote" : "Sign and send NEAR"}
           </button>
         </>
@@ -239,6 +264,7 @@ export function WithdrawOut() {
         >
           NEAR deposit <TxLink chain="near:mainnet" hash={hash} />
           {status?.status ? ` · 1Click: ${status.status}` : ""}
+          {!isFinal(phase) && phase !== "expired" && <span className="block text-sm">Safe to close: this keeps checking while Portfolio is open, and Recent activity shows the result.</span>}
           {phase === "expired" && <span className="block text-sm">1Click hasn&apos;t taken the deposit in time: it refunds to {shortAccount(account)}. This keeps checking once a minute.</span>}
           {phase === "failed" && <span className="block text-sm">Check {shortAccount(account)} for the refund; if nothing arrives, contact 1Click support with the deposit address (the signed quote is in Recent activity).</span>}
         </Banner>
@@ -261,6 +287,6 @@ export function WithdrawOut() {
           onClose={() => setSheet(false)}
         />
       )}
-    </Panel>
+    </div>
   );
 }

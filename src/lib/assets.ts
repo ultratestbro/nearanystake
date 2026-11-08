@@ -35,7 +35,7 @@ const ALL: SourceAsset[] = CC_SOURCE_CHAINS.flatMap((c) =>
 /** What a stake can be paid with: every catalog token 1Click routes, on every chain but NEAR itself. */
 export const SOURCE_ASSETS: SourceAsset[] = ALL.filter((a) => a.chain !== "near:mainnet");
 
-/** Where "Withdraw to any chain" can deliver: the same tokens. */
+/** Where "Cash out to any chain" can deliver: the same tokens. */
 export const DESTINATION_ASSETS: SourceAsset[] = SOURCE_ASSETS;
 
 export const PINNED_CHAINS = ["eip155:8453", "solana:mainnet", "eip155:1", "eip155:42161", "tron:728126428", "ton:-239", "bitcoin:mainnet"];
