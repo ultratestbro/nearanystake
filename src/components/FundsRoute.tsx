@@ -16,6 +16,8 @@ export interface RouteNode {
   id: string;
   icon: ReactNode;
   title: ReactNode;
+  /** A shorter title for phones ("USDC" for "USDC on Base": the icon's badge shows the chain). */
+  short?: ReactNode;
   caption?: ReactNode;
   state: StepState;
   /** Account ids and hashes. */
@@ -36,16 +38,23 @@ export function RouteStrip({ nodes, label }: { nodes: RouteNode[]; label: string
     <div role="group" aria-label={label} className="flex items-start gap-1 rounded-2xl bg-surface px-2 py-3 sm:gap-2 sm:p-4">
       {nodes.map((n, i) => (
         <div key={n.id} className={`flex min-w-0 items-start gap-1 sm:gap-2 ${i < nodes.length - 1 ? "flex-1" : "shrink-0"}`}>
-          <div className="flex w-[64px] shrink-0 flex-col items-center text-center sm:w-[92px]">
+          <div className="flex w-[68px] shrink-0 flex-col items-center text-center sm:w-[92px]">
             <span className={`grid size-8 place-items-center rounded-full ${RING[n.state]}`}>{n.icon}</span>
-            {/* names wrap onto two lines on phones; an account id stays on one line, cut, with the full id on hover */}
+            {/* one line per label on phones: names are cut (full name on hover), figures stay whole */}
             <span
-              title={n.mono && typeof n.title === "string" ? n.title : undefined}
-              className={`mt-2 w-full text-xs font-semibold leading-4 sm:text-[13px] ${n.mono ? "truncate font-mono text-[11px] sm:text-[13px]" : "line-clamp-2"}`}
+              title={typeof n.title === "string" ? n.title : undefined}
+              className={`mt-2 w-full truncate text-[11px] font-semibold leading-4 sm:line-clamp-2 sm:whitespace-normal sm:text-[13px] ${n.mono ? "font-mono" : ""}`}
             >
-              {n.title}
+              {n.short !== undefined ? (
+                <>
+                  <span className="sm:hidden">{n.short}</span>
+                  <span className="hidden sm:inline">{n.title}</span>
+                </>
+              ) : (
+                n.title
+              )}
             </span>
-            {n.caption && <span className="w-full text-[11px] leading-4 text-muted sm:text-xs">{n.caption}</span>}
+            {n.caption && <span className="whitespace-nowrap text-[11px] leading-4 text-muted sm:whitespace-normal sm:text-xs">{n.caption}</span>}
           </div>
           {i < nodes.length - 1 && <Track state={nodes[i + 1]!.state} />}
         </div>

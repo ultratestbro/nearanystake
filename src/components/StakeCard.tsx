@@ -17,6 +17,11 @@ export const SOURCE_CHAIN_COUNT = new Set(SOURCE_ASSETS.map((a) => a.chain)).siz
 /** The big primary action and the quiet secondary one under it. */
 export const CTA = "btn-tactile-accent min-h-14 w-full justify-center whitespace-normal px-6 py-3 text-center text-[17px] leading-6";
 export const QUIET = "inline-flex min-h-11 items-center justify-center rounded-lg px-2 text-sm font-medium text-muted underline-offset-4 hover:text-text hover:underline";
+/** A visible second choice under the primary (e.g. the dry-run quote when no wallet is connected). */
+export const SECONDARY = "btn-tactile min-h-12 w-full justify-center whitespace-normal px-4 py-2 text-center text-[15px] font-medium";
+/** A small outlined pill (quick amounts, other outcomes); the hit area reaches 44 px tall. Add the size. */
+export const CHIP =
+  "relative inline-flex items-center rounded-full border border-line font-medium text-muted transition-colors after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] hover:border-muted hover:text-text";
 
 /** NEAR with as many decimals as the size needs: 1.343, 0.4259, 12.35. */
 export function nearAmount(yocto: bigint): string {
@@ -218,15 +223,15 @@ export function TargetRow({
   );
 }
 
-/** label · value rows inside Details. */
+/** label · value rows inside Details; on phones the label sits above its value. */
 export function DetailRow({ label, hint, children }: { label: ReactNode; hint?: ReactNode; children: ReactNode }) {
   return (
-    <div className="flex items-start justify-between gap-4 py-1.5">
-      <dt className="min-w-0 text-muted">
+    <div className="flex flex-col gap-0.5 py-1.5 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+      <dt className="inline-flex min-h-5 shrink-0 items-center gap-0.5 whitespace-nowrap text-muted">
         {label}
-        {hint && <> {hint}</>}
+        {hint}
       </dt>
-      <dd className="m-0 max-w-[62%] text-right [overflow-wrap:anywhere]">{children}</dd>
+      <dd className="m-0 min-w-0 text-pretty [overflow-wrap:anywhere] sm:text-right">{children}</dd>
     </div>
   );
 }

@@ -6,14 +6,16 @@
 // the quote exactly as 1Click signed it (kept for disputes).
 
 import Link from "next/link";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { DESTINATION_ASSETS, findAsset } from "@/lib/assets";
 import { NEAR_N_PATH } from "@/lib/brand";
 import { ago, dateTime, shortAccount, shortHash } from "@/lib/format";
 import { loadHistory, onHistory, type HistoryRecord, type TxRef } from "@/lib/history";
 import { explorerTx } from "@/lib/near/config";
+import { addressInactiveAt, quoteDeadline } from "@/lib/oneclick/quote";
 import { activityStatus, activitySubtitle, activityTitle, stepText } from "@/lib/portfolio";
 import { useNow } from "@/lib/useAsync";
+import { useApp } from "./AppProvider";
 import { Disclosure } from "./Disclosure";
 import { ArrowUpRightIcon, CheckIcon, ChevronDownIcon, InfoIcon } from "./icons";
 import { InfoHint } from "./InfoHint";
@@ -22,6 +24,8 @@ import { Icon, Skeleton } from "./ui";
 
 /** Rows shown before "Show all". */
 const LIMIT = 5;
+
+const isDry = (r: HistoryRecord) => r.type === "flow" && r.dry;
 
 export function HistoryList() {
   const [items, setItems] = useState<HistoryRecord[] | null>(null);
@@ -38,7 +42,14 @@ export function HistoryList() {
     if (ready && window.location.hash === "#activity") document.getElementById("activity")?.scrollIntoView();
   }, [ready]);
 
-  const shown = items && !all ? items.slice(0, LIMIT) : items;
+  // dry-run quotes collapse into one row (the newest): a few tries must not fill the list
+  const rows = useMemo(() => {
+    if (!items) return null;
+    const newestDry = items.find(isDry);
+    return items.filter((r) => !isDry(r) || r === newestDry);
+  }, [items]);
+  const dryCount = items ? items.filter(isDry).length : 0;
+  const shown = rows && !all ? rows.slice(0, LIMIT) : rows;
   return (
     <section id="activity" aria-labelledby="activity-h" className="scroll-mt-6">
       <div className="mb-2 flex min-h-11 items-center justify-between gap-4">
@@ -48,9 +59,9 @@ export function HistoryList() {
           </h2>
           <InfoHint label="Where this list comes from">Kept in this browser only, with each quote exactly as 1Click signed it: keep it for disputes.</InfoHint>
         </div>
-        {items && items.length > LIMIT && (
+        {rows && rows.length > LIMIT && (
           <button type="button" onClick={() => setAll(!all)} aria-expanded={all} className="inline-flex min-h-11 items-center text-sm font-medium text-accent hover:underline">
-            {all ? "Show fewer" : `Show all ${items.length}`}
+            {all ? "Show fewer" : `Show all ${rows.length}`}
           </button>
         )}
       </div>
@@ -67,7 +78,7 @@ export function HistoryList() {
       ) : (
         <ul className="divide-y divide-line overflow-hidden rounded-[20px] border border-line bg-panel">
           {shown.map((r, i) => (
-            <ActivityRow key={r.id} r={r} now={now} defaultOpen={i === 0} />
+            <ActivityRow key={r.id} r={r} now={now} defaultOpen={i === 0 && !isDry(r)} dryCount={isDry(r) ? dryCount : 0} />
           ))}
         </ul>
       )}
@@ -75,7 +86,7 @@ export function HistoryList() {
   );
 }
 
-function ActivityRow({ r, now, defaultOpen }: { r: HistoryRecord; now: number; defaultOpen: boolean }) {
+function ActivityRow({ r, now, defaultOpen, dryCount }: { r: HistoryRecord; now: number; defaultOpen: boolean; dryCount: number }) {
   const [open, setOpen] = useState(defaultOpen);
   const id = useId();
   const st = activityStatus(r, now);
@@ -97,7 +108,10 @@ function ActivityRow({ r, now, defaultOpen }: { r: HistoryRecord; now: number; d
         <Glyphs r={r} />
         <span className="min-w-0 flex-1">
           <span className="block text-base font-semibold leading-6 [overflow-wrap:anywhere]">{activityTitle(r)}</span>
-          <span className="mt-0.5 block text-sm leading-5 text-muted [overflow-wrap:anywhere]">{activitySubtitle(r)}</span>
+          <span className="mt-0.5 block text-sm leading-5 text-muted [overflow-wrap:anywhere]">
+            {dryCount > 1 ? `Latest of ${dryCount} · ` : ""}
+            {activitySubtitle(r)}
+          </span>
           {/* on phones the state sits under the text, so the title keeps the width */}
           <span className="mt-1.5 flex items-center gap-2 sm:hidden">
             {badge}
@@ -111,17 +125,21 @@ function ActivityRow({ r, now, defaultOpen }: { r: HistoryRecord; now: number; d
         <ChevronDownIcon size={20} className={`text-muted motion-safe:transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       <div id={id} hidden={!open} className="px-4 pb-5 sm:pb-6 sm:pl-20 sm:pr-6">
-        <Details r={r} label={st.label} />
+        <Details r={r} label={st.label} now={now} dryCount={dryCount} />
       </div>
     </li>
   );
 }
 
-function Details({ r, label }: { r: HistoryRecord; label: string }) {
+function Details({ r, label, now, dryCount }: { r: HistoryRecord; label: string; now: number; dryCount: number }) {
+  const { dryRun } = useApp();
   const flow = r.type === "flow" ? r : null;
   const waiting = label === "Waiting for payment";
+  // a live quote's address stays out of sight in dry-run mode while it could still be paid (lib/dryrun.ts)
+  const payableUntil = flow && !flow.dry ? Math.max(quoteDeadline(flow.quote) ?? 0, addressInactiveAt(flow.quote) ?? 0) : 0;
+  const hideAddress = !!flow && !flow.dry && dryRun && (payableUntil === 0 || now <= payableUntil);
   const note = flow?.dry
-    ? "Dry run: a real quote, nothing could be paid."
+    ? `Dry run: a real quote, nothing could be paid.${dryCount > 1 ? ` ${dryCount} dry-run quotes in this browser; only the latest is listed.` : ""}`
     : label === "Not paid"
       ? "Nothing was paid for this quote; its deadline has passed."
       : waiting
@@ -176,9 +194,12 @@ function Details({ r, label }: { r: HistoryRecord; label: string }) {
           {dateTime(r.createdAt)} · <span className="font-mono">{shortAccount(r.account)}</span>
         </p>
       </div>
-      {flow && (
+      {flow && !flow.dry && (
         <Disclosure variant="plain" summary="Signed quote (keep for disputes)">
-          <pre className="mt-1 max-h-64 overflow-auto rounded-xl bg-bg p-3 font-mono text-[11px] leading-relaxed text-muted">{JSON.stringify(flow.quote, null, 2)}</pre>
+          {hideAddress && <p className="mt-1 text-xs text-muted">The deposit address is hidden while dry run is on.</p>}
+          <pre className="mt-1 max-h-64 overflow-auto rounded-xl bg-bg p-3 font-mono text-[11px] leading-relaxed text-muted">
+            {JSON.stringify(hideAddress ? { ...flow.quote, quote: { ...flow.quote.quote, depositAddress: "(hidden while dry run is on)" } } : flow.quote, null, 2)}
+          </pre>
         </Disclosure>
       )}
     </div>
@@ -222,7 +243,7 @@ function NearDisc({ size }: { size: number }) {
 
 function LiquidDisc({ size, label }: { size: number; label: string }) {
   return (
-    <span style={{ width: size, height: size }} className="grid shrink-0 place-items-center rounded-full bg-liquid text-xs font-bold text-accent-ink">
+    <span style={{ width: size, height: size, fontSize: size < 24 ? 8 : 12 }} className="grid shrink-0 place-items-center rounded-full bg-liquid font-bold leading-none text-accent-ink">
       {label}
     </span>
   );
@@ -238,10 +259,12 @@ function Glyphs({ r }: { r: HistoryRecord }) {
         {liquid ? <LiquidDisc size={32} label={liquid} /> : <NearDisc size={32} />}
       </span>
     );
-  const token = (src: string | undefined, alt: string) => (src ? <Icon src={src} alt="" size={28} /> : <span className="grid size-7 place-items-center rounded-full bg-surface-2 text-xs font-semibold">{alt.slice(0, 1)}</span>);
-  const first = r.kind === "withdraw-out" ? <NearDisc size={28} /> : token(findAsset(r.source.chain, r.source.symbol)?.icon, r.source.symbol);
+  const token = (src: string | undefined, alt: string, size: number) =>
+    src ? <Icon src={src} alt="" size={size} /> : <span style={{ width: size, height: size }} className="grid place-items-center rounded-full bg-surface-2 text-[10px] font-semibold">{alt.slice(0, 1)}</span>;
+  // the second coin is a small corner badge, so the first (what was paid) stays recognisable
+  const first = r.kind === "withdraw-out" ? <NearDisc size={30} /> : token(findAsset(r.source.chain, r.source.symbol)?.icon, r.source.symbol, 30);
   const second =
-    r.kind === "withdraw-out" ? token(DESTINATION_ASSETS.find((a) => a.assetId === r.target)?.icon, r.targetLabel) : liquid ? <LiquidDisc size={28} label={liquid} /> : <NearDisc size={28} />;
+    r.kind === "withdraw-out" ? token(DESTINATION_ASSETS.find((a) => a.assetId === r.target)?.icon, r.targetLabel, 18) : liquid ? <LiquidDisc size={18} label={liquid} /> : <NearDisc size={18} />;
   return (
     <span aria-hidden className="relative size-10 shrink-0">
       <span className="absolute left-0 top-0">{first}</span>

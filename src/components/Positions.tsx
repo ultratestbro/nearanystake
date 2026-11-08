@@ -20,6 +20,7 @@ import { useAccountStaking, useNetworkStaking } from "./hooks";
 import { ArrowRightIcon, PlusIcon } from "./icons";
 import { Modal } from "./Modal";
 import { LiquidPositionCard, NativePositionCard, liquidHolding, type LiquidData } from "./PositionCard";
+import { ClaimModal } from "./PositionModals";
 import { StatusBadge } from "./StatusBadge";
 import { Banner, Skeleton } from "./ui";
 import { WithdrawOut } from "./WithdrawOut";
@@ -86,7 +87,8 @@ function Dashboard({ mode, account, s, activity }: { mode: Mode; account: string
   const liquidApr = useAsync(() => Promise.all(LIQUID_OPTIONS.map((o) => s.liquid[o.id].getApr().catch(() => null))), [s]);
   const stats = useAsync(() => network.getNetworkStats(), [network]);
   const price = useAsync(() => listTokens().then((ts) => ts.find((t) => t.assetId === "nep141:wrap.near")?.price ?? null), []).data ?? null;
-  const spendable = useAsync(mode === "mine" ? () => nearSpendable(account) : null, [account, mode], 30_000);
+  const spendable = useAsync(on ? () => nearSpendable(account) : null, [account, on], 30_000);
+  const [claim, setClaim] = useState(false);
 
   const reloadBalance = balance.reload;
   const reloadLiquid = liquidAcct.reload;
@@ -123,6 +125,12 @@ function Dashboard({ mode, account, s, activity }: { mode: Mode; account: string
   const unlocks = [...native.map((p) => p.unlock), ...held.map((l) => (l.state === "ok" ? l.data.request?.unlock : null))].filter((u): u is UnlockEstimate => !!u).map((u) => u.at ?? u.earliestAt);
   const soonest = unlocks.length ? Math.min(...unlocks) : null;
   const count = native.length + held.length;
+  // nothing earning but NEAR still in pools: the hero shows that NEAR and the step it waits for
+  const inPools = sum.unstaking + sum.ready;
+  const unstakedOnly = sum.staked === 0n && inPools > 0n;
+  const nativeReady = native.reduce((a, p) => a + p.withdrawable, 0n);
+  const heroWithdraw = unstakedOnly && nativeReady > 0n;
+  const eyebrow = !unstakedOnly ? "Total staked" : sum.unstaking === 0n ? "Ready to withdraw" : sum.ready === 0n ? "Unstaking" : "Unstaked, still in pools";
 
   return (
     <>
@@ -131,7 +139,8 @@ function Dashboard({ mode, account, s, activity }: { mode: Mode; account: string
           <div className="flex flex-wrap items-end justify-between gap-6">
             <div className="min-w-0">
               <h2 id="total-h" className="text-sm font-medium text-muted">
-                Total staked{mode === "demo" && <span className="font-normal"> · {shortAccount(account)}</span>}
+                {eyebrow}
+                {mode === "demo" && <span className="font-normal"> · {shortAccount(account)}</span>}
               </h2>
               {balance.error ? (
                 <p className="mt-2 text-4xl font-semibold text-muted">—</p>
@@ -139,18 +148,36 @@ function Dashboard({ mode, account, s, activity }: { mode: Mode; account: string
                 <Skeleton className="mt-3 h-[4.5rem] w-60 max-w-full" />
               ) : (
                 <p className="mt-2 flex flex-wrap items-baseline gap-x-3 font-semibold tabular-nums">
-                  <span className="text-[length:clamp(2.5rem,7vw,4rem)] leading-[1.15] tracking-[-0.03em]">{heroAmount(sum.staked)}</span>
+                  <span className="text-[length:clamp(2.5rem,7vw,4rem)] leading-[1.15] tracking-[-0.03em]">{heroAmount(unstakedOnly ? inPools : sum.staked)}</span>
                   <span className="text-[28px] font-medium leading-9 text-muted">NEAR</span>
                 </p>
               )}
-              {loaded && <HeroLine staked={sum.staked} yearly={sum.yearly} apr={sum.apr} partialApr={sum.aprPartial} price={price} moving={sum.unstaking + sum.ready > 0n} />}
+              {loaded &&
+                (unstakedOnly ? (
+                  <UnstakedLine ready={sum.ready} unstaking={sum.unstaking} price={price} unlockIn={soonest !== null && soonest > now ? duration(soonest - now) : null} />
+                ) : (
+                  <HeroLine staked={sum.staked} yearly={sum.yearly} apr={sum.apr} partialApr={sum.aprPartial} price={price} />
+                ))}
               {balance.data?.partial && <p className="mt-1 text-sm text-warn">Known pools only: the pool lookup is down right now.</p>}
             </div>
-            <Link href="/stake" className="btn-tactile-accent h-14 w-full justify-center px-7 text-base sm:w-auto">
-              <PlusIcon size={20} />
-              {mode === "mine" && sum.staked > 0n ? "Stake more" : "Stake NEAR"}
-            </Link>
+            {heroWithdraw ? (
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row-reverse">
+                <button type="button" onClick={() => setClaim(true)} className="btn-tactile-accent h-14 justify-center px-7 text-base">
+                  Withdraw
+                </button>
+                <Link href="/stake" className="btn-tactile h-14 justify-center px-6 text-base font-medium">
+                  <PlusIcon size={20} />
+                  Stake more
+                </Link>
+              </div>
+            ) : (
+              <Link href="/stake" className="btn-tactile-accent h-14 w-full justify-center px-7 text-base sm:w-auto">
+                <PlusIcon size={20} />
+                {mode === "mine" && sum.staked > 0n ? "Stake more" : "Stake NEAR"}
+              </Link>
+            )}
           </div>
+          {claim && <ClaimModal native={s.native} readOnly={s.readOnly} account={account} onClose={() => setClaim(false)} onDone={onNativeDone} />}
           <div className="mt-6 grid grid-cols-[repeat(auto-fit,minmax(min(100%,140px),1fr))] gap-x-4 gap-y-5 border-t border-line pt-6 sm:mt-8 sm:grid-cols-[repeat(auto-fit,minmax(min(100%,220px),1fr))] sm:gap-6">
             <EpochClock compact label={sum.staked > 0n ? "Next reward" : "Next epoch"} />
             <Cell
@@ -201,7 +228,7 @@ function Dashboard({ mode, account, s, activity }: { mode: Mode; account: string
               )}
               {loaded &&
                 native.map((p) => (
-                  <NativePositionCard key={p.pool} p={p} native={s.native} readOnly={s.readOnly} account={account} epoch={epoch} price={price} onDone={onNativeDone} />
+                  <NativePositionCard key={p.pool} p={p} native={s.native} readOnly={s.readOnly} account={account} epoch={epoch} price={price} onDone={onNativeDone} quietWithdraw={heroWithdraw} />
                 ))}
               {loaded &&
                 held.map((l) =>
@@ -222,7 +249,7 @@ function Dashboard({ mode, account, s, activity }: { mode: Mode; account: string
         )}
 
         <aside aria-label="Your account and rates" className="flex min-w-0 flex-col gap-6 lg:col-start-2 lg:row-span-2 lg:row-start-1">
-          {mode === "mine" && <Available spendable={spendable.data} error={spendable.error} price={price} onCashOutState={reloadSpendable} />}
+          {on && <Available readOnly={mode !== "mine"} spendable={spendable.data} error={spendable.error} price={price} onCashOutState={reloadSpendable} />}
           <Rates title={sum.staked > 0n ? "Other ways to earn" : "Ways to earn"} nativeApr={stats.data?.apr} nativeError={!!stats.error} epoch={epoch} now={now} liquid={liquid.map((l, i) => ({ id: l.id, apr: l.apr, aprLoading: liquidApr.data === undefined, price: liquidPool.data?.[i]?.ok ? liquidPool.data[i].value.price : undefined }))} />
         </aside>
 
@@ -232,8 +259,8 @@ function Dashboard({ mode, account, s, activity }: { mode: Mode; account: string
   );
 }
 
-function HeroLine({ staked, yearly, apr, partialApr, price, moving }: { staked: bigint; yearly: bigint | null; apr: number | null; partialApr: boolean; price: number | null; moving: boolean }) {
-  if (staked === 0n) return <p className="mt-2 text-base text-muted">{moving ? "Nothing earning right now." : "Nothing staked yet."}</p>;
+function HeroLine({ staked, yearly, apr, partialApr, price }: { staked: bigint; yearly: bigint | null; apr: number | null; partialApr: boolean; price: number | null }) {
+  if (staked === 0n) return <p className="mt-2 text-base text-muted">Nothing staked yet.</p>;
   const usd = usdText(staked, price);
   return (
     <p className="mt-2 text-base text-muted">
@@ -249,6 +276,30 @@ function HeroLine({ staked, yearly, apr, partialApr, price, moving }: { staked: 
           {percent(apr)} APR
         </>
       )}
+    </p>
+  );
+}
+
+/** Under the hero figure when nothing earns but NEAR is still in pools: what it waits for. */
+function UnstakedLine({ ready, unstaking, price, unlockIn }: { ready: bigint; unstaking: bigint; price: number | null; unlockIn: string | null }) {
+  const usd = usdText(ready + unstaking, price);
+  const what =
+    unstaking === 0n
+      ? "Unlocked and not earning: withdraw it to the account."
+      : ready === 0n
+        ? `Not earning while it unlocks${unlockIn ? `, first unlock in ${unlockIn}` : ""}.`
+        : `${formatNear(ready)} ready to withdraw, ${formatNear(unstaking)} still unlocking. Not earning.`;
+  return (
+    <p className="mt-2 text-base text-muted">
+      {usd && (
+        <>
+          {usd}
+          <span aria-hidden className="mx-2">
+            ·
+          </span>
+        </>
+      )}
+      {what}
     </p>
   );
 }
@@ -269,7 +320,7 @@ function ConnectHero() {
     <section aria-labelledby="connect-h" className="rounded-3xl border border-line bg-panel p-5 sm:p-8">
       <div className="flex flex-wrap items-end justify-between gap-6">
         <div className="min-w-0 max-w-2xl">
-          <p className="text-sm font-medium text-muted">Total staked</p>
+          <p className="text-sm font-medium text-muted">Your portfolio</p>
           <h2 id="connect-h" className="mt-2 text-2xl font-semibold sm:text-3xl">
             Connect a NEAR wallet to see your stake
           </h2>
@@ -289,7 +340,8 @@ function ConnectHero() {
 }
 
 /** The NEAR on the account that is not staked, why it is there, and the way out to any chain. */
-function Available({ spendable, error, price, onCashOutState }: { spendable: bigint | undefined; error: string; price: number | null; onCashOutState: () => void }) {
+function Available({ readOnly, spendable, error, price, onCashOutState }: { readOnly: boolean; spendable: bigint | undefined; error: string; price: number | null; onCashOutState: () => void }) {
+  const { near } = useApp();
   const [open, setOpen] = useState(false);
   // a sent cash-out stays mounted (hidden) while 1Click works, so its status keeps updating
   const [inFlight, setInFlight] = useState(false);
@@ -304,7 +356,7 @@ function Available({ spendable, error, price, onCashOutState }: { spendable: big
   return (
     <section aria-labelledby="avail-h" className="rounded-[20px] border border-line bg-panel p-6">
       <h2 id="avail-h" className="text-sm font-medium text-muted">
-        Available on your account
+        {readOnly ? "Available on this account" : "Available on your account"}
       </h2>
       {spendable !== undefined ? (
         <p className="mt-2 text-[28px] font-semibold leading-9 tabular-nums">{formatNear(spendable)}</p>
@@ -319,11 +371,22 @@ function Available({ spendable, error, price, onCashOutState }: { spendable: big
           ? "Kept back when you staked: a gas reserve so you can unstake later, plus gas refunded after the stake. Yours to use any time."
           : `Not staked, so it isn't earning. Yours to use any time; a cash-out keeps ${formatNear(DEFAULT_RESERVE, 2)} for the gas of a later unstake.`}
       </p>
-      <button type="button" onClick={() => setOpen(true)} disabled={spendable === 0n && !inFlight} className="btn-tactile mt-5 min-h-11 w-full justify-center px-5 text-[15px] font-medium">
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        disabled={readOnly || (spendable === 0n && !inFlight)}
+        aria-describedby={readOnly ? "avail-ro" : undefined}
+        className="btn-tactile mt-5 min-h-11 w-full justify-center px-5 text-[15px] font-medium"
+      >
         {inFlight && !open ? "Cash-out on its way: show it" : "Cash out to any chain"}
         <ArrowRightIcon />
       </button>
-      {(open || inFlight) && (
+      {readOnly && (
+        <p id="avail-ro" className="mt-2 text-center text-[13px] text-muted">
+          {near ? "Demo account: show your own account to cash out." : "Demo account: connect a wallet to cash out."}
+        </p>
+      )}
+      {!readOnly && (open || inFlight) && (
         <Modal title="Cash out to any chain" open={open} onClose={() => setOpen(false)} wide>
           <WithdrawOut onInFlight={onInFlight} />
         </Modal>

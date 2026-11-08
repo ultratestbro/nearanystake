@@ -10,6 +10,7 @@ import { CheckIcon, ShieldCheckIcon } from "./icons";
 import { InfoHint } from "./InfoHint";
 import { PoolAvatar, compactNear, poolBadge, poolName } from "./PoolAvatar";
 import { StatusBadge } from "./StatusBadge";
+import { CHIP } from "./StakeCard";
 import { Skeleton, Spinner } from "./ui";
 
 const PAGE = 12;
@@ -38,7 +39,7 @@ export function ValidatorList({ onPick, picked, compact = false }: { onPick?: (p
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
         <input
           value={q}
           onChange={(e) => {
@@ -47,9 +48,15 @@ export function ValidatorList({ onPick, picked, compact = false }: { onPick?: (p
           }}
           placeholder="Search pools"
           aria-label="Search pools"
-          className="min-h-11 min-w-0 flex-1 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none focus:border-accent"
+          className="min-h-11 w-full min-w-0 flex-1 rounded-xl border border-line bg-surface-2 px-3 text-sm outline-none focus:border-accent"
         />
-        <button type="button" aria-pressed={hideTop} onClick={() => setHideTop(!hideTop)} className="btn-tactile min-h-11 justify-center px-3.5 text-sm font-medium">
+        <button
+          type="button"
+          aria-pressed={hideTop}
+          onClick={() => setHideTop(!hideTop)}
+          className={`${CHIP} min-h-8 shrink-0 gap-1.5 px-3 text-[13px] aria-pressed:border-accent aria-pressed:text-text`}
+        >
+          {hideTop && <CheckIcon size={14} className="text-accent" />}
           Hide top 10 by stake
         </button>
       </div>
@@ -126,7 +133,7 @@ function PickRow({ p, loading, onPick, picked }: { p: NearPoolInfo; loading: boo
         aria-pressed={picked}
         disabled={blocked}
         onClick={() => onPick(p)}
-        aria-label={`${name}, ${apr !== null ? `${percent(apr)} APR` : "APR unknown"}, ${feeText(p)}. ${loading ? "" : b.details}`}
+        aria-label={`${name}, ${apr !== null ? `${percent(apr)} APR` : "APR unknown"}, ${feeText(p)}. ${loading ? "" : `${b.label}: ${b.details}`}`}
         className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60 aria-pressed:bg-surface"
       >
         <PoolAvatar name={name} size={36} />
@@ -136,7 +143,16 @@ function PickRow({ p, loading, onPick, picked }: { p: NearPoolInfo; loading: boo
             {apr !== null ? `${percent(apr)}${p.apr === null ? "*" : ""} APR` : "APR —"} · {loading ? "…" : feeText(p)} · {compactNear(p.stake)} NEAR
           </span>
         </span>
-        <Badge p={p} loading={loading} />
+        {/* verified is the norm, so a small shield says it; only an exception gets a word */}
+        {loading ? (
+          <Spinner />
+        ) : b.tone === "success" ? (
+          <span title={b.label} className="grid size-6 shrink-0 place-items-center text-accent">
+            <ShieldCheckIcon size={16} />
+          </span>
+        ) : (
+          <Badge p={p} loading={false} />
+        )}
         <span className="grid w-4 shrink-0 place-items-center">{picked && <CheckIcon className="text-accent" />}</span>
       </button>
     </li>

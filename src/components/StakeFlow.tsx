@@ -34,7 +34,7 @@ import { InfoHint } from "./InfoHint";
 import { Modal } from "./Modal";
 import { PayWithButton, PayWithSheet, TokenIcon } from "./PayWithSheet";
 import { PoolAvatar, compactNear, poolBadge, poolName } from "./PoolAvatar";
-import { Box, CTA, CardShell, Connector, DetailRow, HowItWorks, ModeDot, Notice, QUIET, StakeIntro, TargetChoice, TargetRow, nearAmount } from "./StakeCard";
+import { Box, CHIP, CTA, CardShell, Connector, DetailRow, HowItWorks, ModeDot, Notice, QUIET, SECONDARY, StakeIntro, TargetChoice, TargetRow, nearAmount } from "./StakeCard";
 import { StatusBadge, type StatusTone } from "./StatusBadge";
 import { TxPreview } from "./TxPreview";
 import { ValidatorList } from "./ValidatorList";
@@ -124,7 +124,14 @@ function targetView(t: Target, d: TargetData, recipient: string | null): TargetV
       short: name,
       avatar: <PoolAvatar name={name} />,
       apr: p?.apr ?? null,
-      meta: p ? `${percent(p.apr)} APR · ${fee ? `${fee} fee` : "fee —"} · ${compactNear(p.stake)} NEAR in pool` : d.pool.error || <Skeleton className="mt-1 h-4 w-44" />,
+      meta: p ? (
+        <>
+          <span className="whitespace-nowrap">{percent(p.apr)} APR</span> · <span className="whitespace-nowrap">{fee ? `${fee} fee` : "fee —"}</span> ·{" "}
+          <span className="whitespace-nowrap">{compactNear(p.stake)}&nbsp;NEAR in pool</span>
+        </>
+      ) : (
+        d.pool.error || <Skeleton className="mt-1 h-4 w-44" />
+      ),
       badge: b ? trustBadge(b.label, b.tone, b.details) : null,
       problem: p && !p.eligible ? { text: `Can't take stake: ${p.refusals.map(refusalText).join(", ")}.`, tone: "danger" } : null,
       fee: fee ? { label: "Pool fee", text: `${fee} of rewards, already in the APR` } : null,
@@ -148,7 +155,15 @@ function targetView(t: Target, d: TargetData, recipient: string | null): TargetV
       short: o.symbol,
       avatar: <PoolAvatar name={o.symbol} tone="liquid" />,
       apr: l?.apr ?? null,
-      meta: l ? `${percent(l.apr)} APR · 1 ${o.symbol} = ${formatUnits(l.info.price, 24, 4)} NEAR` : s.error ? "unavailable right now" : <Skeleton className="mt-1 h-4 w-44" />,
+      meta: l ? (
+        <>
+          <span className="whitespace-nowrap">{percent(l.apr)} APR</span> · <span className="whitespace-nowrap">1 {o.symbol} = {formatUnits(l.info.price, 24, 4)} NEAR</span>
+        </>
+      ) : s.error ? (
+        "unavailable right now"
+      ) : (
+        <Skeleton className="mt-1 h-4 w-44" />
+      ),
       badge,
       problem: l && !ok ? { text: `${o.label} can't take stake right now. Pick a validator pool instead.`, tone: "danger" } : null,
       fee: l ? { label: "Protocol fee", text: `${(l.info.feeBps / 100).toFixed(l.info.feeBps % 100 ? 1 : 0)}% of rewards, already in the APR` } : null,
@@ -215,11 +230,11 @@ function YouGet({ where, big, usd, earns, unlock, hint }: { where: string; big: 
       </div>
       <div className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-4 border-t border-line pt-3">
         <div>
-          <div className="text-xs leading-4 text-muted">Earns</div>
+          <div className="flex min-h-6 items-center text-xs leading-4 text-muted">Earns</div>
           <div className="text-sm font-medium leading-5">{earns}</div>
         </div>
         <div>
-          <div className="inline-flex items-center gap-0.5 text-xs leading-4 text-muted">
+          <div className="flex min-h-6 items-center gap-0.5 text-xs leading-4 text-muted">
             If you unstake <InfoHint label="When unstaked NEAR unlocks">{unlock.hint}</InfoHint>
           </div>
           <div className="text-sm font-medium leading-5">{unlock.value}</div>
@@ -434,6 +449,8 @@ export function StakeFlow() {
     <span className="text-warn">Add a refund address</span>
   ) : confirmOwn && !ownWallet ? (
     <span className="text-warn">Confirm the refund address</span>
+  ) : !near ? (
+    "To a demo account (dry run)"
   ) : (
     `To ${recipient ? shortAccount(recipient) : "your NEAR account"}${refund ? ` · refunds to ${shortAccount(refund)}` : ""}`
   );
@@ -464,8 +481,8 @@ export function StakeFlow() {
   let next: ReactNode = null;
   if (ctaKind === "near") {
     secondary = (
-      <button type="button" onClick={() => void getQuote()} disabled={quoting || !asset} className={QUIET}>
-        {quoting ? "Getting a dry-run quote…" : "Or get a dry-run quote: nothing to pay"}
+      <button type="button" onClick={() => void getQuote()} disabled={quoting || !asset} className={SECONDARY}>
+        {quoting ? "Getting a dry-run quote…" : "Get a dry-run quote · nothing to pay"}
       </button>
     );
     next = "Your NEAR is delivered to your own NEAR account, so that comes first.";
@@ -539,7 +556,7 @@ export function StakeFlow() {
                     type="button"
                     aria-label={`Pay about $${d}`}
                     onClick={() => setAmountText(formatUnits(BigInt(Math.round((d / price) * 10 ** Math.min(asset.decimals, 8))) * 10n ** BigInt(Math.max(0, asset.decimals - 8)), asset.decimals, 6).replace(/,/g, ""))}
-                    className="relative min-h-8 rounded-full border border-line px-2.5 text-xs font-medium text-muted transition-colors after:absolute after:-inset-y-1.5 after:inset-x-0 after:content-[''] hover:border-muted hover:text-text"
+                    className={`${CHIP} min-h-8 px-2.5 text-xs`}
                   >
                     ${d}
                   </button>
@@ -628,7 +645,7 @@ export function StakeFlow() {
                 <span className="text-warn">Add your own {chain} address</span>
               )}
               {(payer || dryStandIn) && (
-                <button type="button" onClick={() => setEditRefund(!editRefund)} aria-expanded={showRefundInput} className="ml-2 font-medium text-accent hover:underline">
+                <button type="button" onClick={() => setEditRefund(!editRefund)} aria-expanded={showRefundInput} className="ml-2 whitespace-nowrap font-medium text-accent hover:underline">
                   {editRefund ? "Done" : refund ? "Change" : "Add one"}
                 </button>
               )}
@@ -733,6 +750,12 @@ function mss(ms: number): string {
 }
 
 const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** 1Click's refund reason in words: "PRICE_MOVED" → "the price moved before the swap". */
+function refundReasonText(reason: string): string {
+  const known: Record<string, string> = { PRICE_MOVED: "the price moved before the swap" };
+  return known[reason] ?? reason.toLowerCase().replace(/_/g, " ");
+}
 
 // ── Review, deposit, tracking, stake ───────────────────────────────────────────────────────────
 
@@ -989,17 +1012,19 @@ function QuoteAndTrack({
           {isDry ? (
             <div className="mt-4 flex flex-col gap-2">
               <button type="button" onClick={() => simulate("success")} className={CTA}>
-                Simulate: delivered
+                Play the next steps (simulated)
               </button>
-              <div className="flex flex-wrap items-center justify-center text-[13px] text-muted">
-                <span className="mr-1">Or replay:</span>
+              <p className="text-center text-[13px] leading-5 text-muted">Dry run: no deposit address, nothing to pay.</p>
+              <div role="group" aria-labelledby="sim-other" className="mt-1 flex flex-wrap items-center justify-center gap-x-2 gap-y-3">
+                <span id="sim-other" className="w-full text-center text-[13px] leading-5 text-muted">
+                  Or try another outcome
+                </span>
                 {SIM_OUTCOMES.filter((o) => o.id !== "success").map((o) => (
-                  <button key={o.id} type="button" onClick={() => simulate(o.id)} className="min-h-11 rounded-lg px-1.5 font-medium underline-offset-4 hover:text-text hover:underline">
+                  <button key={o.id} type="button" onClick={() => simulate(o.id)} className={`${CHIP} min-h-8 px-3 text-[13px]`}>
                     {o.label}
                   </button>
                 ))}
               </div>
-              <p className="text-center text-[13px] leading-5 text-muted">Dry run: no deposit address, nothing to pay. The replay uses statuses shaped like real 1Click answers, marked simulated.</p>
             </div>
           ) : (
             <div className="mt-4 flex flex-col gap-2">
@@ -1187,7 +1212,7 @@ function QuoteAndTrack({
         ? {
             id: "pool",
             state: "done",
-            title: `Staked ${formatNear(BigInt(record!.staked!))} in ${tv.short}`,
+            title: `Staked ${nearAmount(BigInt(record!.staked!))} NEAR in ${tv.short}`,
             detail: (
               <>
                 Already staked.{" "}
@@ -1253,7 +1278,7 @@ function QuoteAndTrack({
                   : { label: "Deadline passed", tone: "danger" };
 
   const routeNodes: RouteNode[] = [
-    { id: "source", icon: <TokenIcon asset={asset} ring="ring-surface" />, title: `${asset.symbol} on ${asset.chainLabel}`, caption: amountInText, state: states.source },
+    { id: "source", icon: <TokenIcon asset={asset} ring="ring-surface" />, title: `${asset.symbol} on ${asset.chainLabel}`, short: asset.symbol, caption: amountInText, state: states.source },
     {
       id: "intents",
       icon: (
@@ -1262,6 +1287,7 @@ function QuoteAndTrack({
         </span>
       ),
       title: "NEAR Intents",
+      short: "Intents",
       caption: "swap",
       state: states.intents,
     },
@@ -1366,7 +1392,7 @@ function QuoteAndTrack({
         {phase === "refunded" && (
           <Notice tone="danger" title="Refunded">
             {status?.swapDetails.refundedAmount
-              ? `${formatUnits(BigInt(status.swapDetails.refundedAmount), asset.decimals)} ${asset.symbol} went back to ${shortAccount(quote.req.refundTo)}${status.swapDetails.refundReason ? ` (${status.swapDetails.refundReason})` : ""}.`
+              ? `${formatUnits(BigInt(status.swapDetails.refundedAmount), asset.decimals)} ${asset.symbol} went back to ${shortAccount(quote.req.refundTo)}${status.swapDetails.refundReason ? `: ${refundReasonText(status.swapDetails.refundReason)}` : ""}.`
               : `The deposit went back to ${shortAccount(quote.req.refundTo)} on ${asset.chainLabel}, minus the refund fee.`}{" "}
             Nothing reached NEAR, so there is nothing to unstake.
           </Notice>
@@ -1384,6 +1410,12 @@ function QuoteAndTrack({
           </Notice>
         )}
       </div>
+
+      {(phase === "refunded" || phase === "failed" || phase === "expired") && (
+        <button type="button" onClick={onRestart} className={`${CTA} mt-4`}>
+          Try again with a new quote
+        </button>
+      )}
 
       <div className="mt-6">
         <StepList steps={steps} />
@@ -1408,9 +1440,13 @@ function QuoteAndTrack({
       )}
 
       <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
-        <button type="button" onClick={onRestart} className={`${QUIET} -ml-2`}>
-          Start a new stake
-        </button>
+        {phase === "refunded" || phase === "failed" || phase === "expired" ? (
+          <span />
+        ) : (
+          <button type="button" onClick={onRestart} className={`${QUIET} -ml-2`}>
+            Start a new stake
+          </button>
+        )}
         <Link href="/portfolio" className={`${QUIET} -mr-2`}>
           Go to Portfolio
         </Link>
@@ -1585,7 +1621,7 @@ function StakeStep({
     return (
       <div className="min-w-0">
         <p className="text-[15px] font-semibold leading-6">
-          <span className="sr-only">Done: </span>Staked {formatNear(staked ?? amount?.amount ?? 0n)} in {short}
+          <span className="sr-only">Done: </span>Staked {nearAmount(staked ?? amount?.amount ?? 0n)} NEAR in {short}
         </p>
         <p className="text-[13px] leading-5 text-muted">
           {hash && (
@@ -1603,7 +1639,8 @@ function StakeStep({
   const blocked = unconfirmed !== null && !checkedNotStaked;
   const walletName = near?.walletName ?? "your NEAR wallet";
   const shownApr = preflight?.apr ?? apr;
-  const willStake = amount && !amount.tooSmall ? formatNear(amount.amount, 4) : null;
+  const willStake = amount && !amount.tooSmall ? `${nearAmount(amount.amount)} NEAR` : null;
+  const delivered = reportedDelivery(status);
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
       <div>
@@ -1618,12 +1655,14 @@ function StakeStep({
       {amount ? (
         <dl className="border-y border-line py-1.5 text-[13px] leading-5">
           <DetailRow label="Delivered" hint={<InfoHint label="Where this figure comes from">{amount.basis === "on-chain" ? "Read from the NEAR transaction." : "As 1Click reports it."}</InfoHint>}>
-            {reportedDelivery(status) !== null ? formatNear(reportedDelivery(status)!, 5) : "—"}
+            {delivered !== null ? <span title={formatNear(delivered, 24)}>{nearAmount(delivered)} NEAR</span> : "—"}
             {amount.mismatch && <span className="block text-warn">the NEAR transaction and 1Click differ: the lower figure is staked</span>}
           </DetailRow>
           <DetailRow label="Will stake">
-            <span className="font-semibold text-accent">{amount.tooSmall ? "too small to stake" : formatNear(amount.amount, 5)}</span>
-            <span className="block text-muted">{amount.capped ? "capped by what the account can spend" : "exactly the delivery"}</span>
+            <span className="font-semibold text-accent" title={amount.tooSmall ? undefined : formatNear(amount.amount, 24)}>
+              {amount.tooSmall ? "too small to stake" : willStake}
+            </span>
+            <span className="block text-muted">{amount.capped ? "the delivery minus the gas reserve kept on your account" : "exactly the delivery"}</span>
           </DetailRow>
         </dl>
       ) : amountErr ? (
@@ -1655,10 +1694,16 @@ function StakeStep({
         type="button"
         onClick={() => void sign()}
         disabled={!signing || !preflight || stake === "signing" || busy || blocked}
-        className={CTA}
+        className={`${CTA} ${signing ? "" : "disabled:bg-surface disabled:text-muted disabled:opacity-100 disabled:shadow-none"}`}
         title={signing ? undefined : "Dry run / demo account: nothing to sign"}
       >
-        {stake === "signing" ? "Confirm in your wallet…" : signing ? `Sign and stake${willStake ? ` ${willStake}` : ""} in ${walletName}` : "Sign and stake"}
+        {stake === "signing"
+          ? "Confirm in your wallet…"
+          : signing
+            ? `Sign and stake${willStake ? ` ${willStake}` : ""} in ${walletName}`
+            : simulated
+              ? "Sign and stake (live runs only)"
+              : "Sign and stake"}
       </button>
       {!signing && (
         <p className="text-[13px] leading-5 text-muted">
@@ -1672,7 +1717,7 @@ function StakeStep({
       {/* "Check again" sits beside the toggle; the opened preview takes the box's full width under both */}
       <div className="relative min-h-11">
         {preflight && (
-          <Disclosure variant="plain" summary="What you'll sign" className="pr-28" bodyClassName="-mr-28 flex flex-col gap-2 pb-1">
+          <Disclosure variant="plain" summary="What you'll sign" defaultOpen={signing} className="pr-28" bodyClassName="-mr-28 flex flex-col gap-2 pb-1">
             <TxPreview transactions={preflight.transactions} title="The transaction, as the staking module built it" />
             <p className="text-xs leading-4 text-muted">
               Network fee at most {formatNear(preflight.fee, 5)} · {formatNear(preflight.upfront, 4)} held back for gas while it runs (refunded) · {formatNear(preflight.reserve, 4)}{" "}

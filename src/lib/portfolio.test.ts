@@ -78,6 +78,8 @@ describe("recent activity in plain words", () => {
     expect(activityStatus(flow({ dry: true, quote: dryNear.response as unknown as QuoteResponse }), now)).toEqual({ label: "Dry run", tone: "neutral" });
     expect(activityStatus(flow({ status: "SUCCESS", staked: near("0.4259").toString() }), now).label).toBe("Done");
     expect(activityStatus(flow({ status: "SUCCESS" }), now)).toEqual({ label: "Needs your signature", tone: "attention" });
+    // signed earlier, result never confirmed: never "Needs your signature" (that would push a second stake)
+    expect(activityStatus(flow({ status: "SUCCESS", stakeAttemptAt: 5 }), now)).toEqual({ label: "Check your stake", tone: "attention" });
     expect(activityStatus(flow({ kind: "instant-stnear", status: "SUCCESS" }), now).label).toBe("Done");
     expect(activityStatus(flow({ status: "PROCESSING" }), now)).toEqual({ label: "In progress", tone: "progress" });
     expect(activityStatus(flow({ status: "REFUNDED" }), now)).toEqual({ label: "Refunded", tone: "danger" });

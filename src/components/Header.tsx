@@ -39,15 +39,29 @@ export function HeaderNav({ className = "" }: { className?: string }) {
 }
 
 /**
- * Dry run / Live, with what it means in plain words. Dry without a NEAR wallet (live quotes deliver
- * to it), so there the control offers to connect one; connecting turns live on by itself unless the
- * user picked dry run before (lib/dryrun.ts).
+ * Dry run / Live, with what it means in plain words. Without a NEAR wallet it is a status, not a
+ * control: live quotes deliver to that wallet, and connecting one (the account chip) turns live on
+ * by itself unless the user picked dry run before (lib/dryrun.ts initialDryRun).
  */
 export function DryRunToggle({ className = "" }: { className?: string }) {
-  const { dryRun, setDryRun, near, connectNear, connecting, restoring } = useApp();
-  const needsWallet = dryRun && !near;
+  const { dryRun, setDryRun, near } = useApp();
   const id = useId();
-  const action = needsWallet ? "Connect a NEAR wallet to go live." : dryRun ? "Click to go live." : "Click to switch to dry run.";
+  if (!near)
+    return (
+      <span
+        title="Dry run shows real quotes but never creates a deposit address, so nothing can be paid by accident. Connect a NEAR wallet to go live."
+        className={`inline-flex min-h-11 shrink-0 items-center gap-2 py-1 pr-1 text-left ${className}`}
+      >
+        <span aria-hidden className="size-2 shrink-0 rounded-full bg-muted" />
+        <span className="flex flex-col leading-4">
+          <span className="text-[13px] font-medium">Dry run</span>
+          <span className="text-xs text-muted">
+            <span className="sm:hidden">Connect to go live</span>
+            <span className="hidden sm:inline">Nothing to pay · connect a wallet to go live</span>
+          </span>
+        </span>
+      </span>
+    );
   const meaning = dryRun
     ? "Dry run shows real quotes but never creates a deposit address, so nothing can be paid by accident."
     : "Live: quotes come with a deposit address and payments are real.";
@@ -55,11 +69,12 @@ export function DryRunToggle({ className = "" }: { className?: string }) {
     <>
       <button
         type="button"
-        onClick={() => (needsWallet ? void connectNear({ live: true }) : setDryRun(!dryRun))}
-        disabled={restoring || (needsWallet && connecting)}
+        role="switch"
+        aria-checked={!dryRun}
+        onClick={() => setDryRun(!dryRun)}
         aria-describedby={id}
-        title={`${meaning} ${action}`}
-        className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-line py-1 pl-2 pr-3 text-left transition-colors hover:bg-surface disabled:cursor-wait disabled:opacity-60 ${className}`}
+        title={`${meaning} ${dryRun ? "Click to go live." : "Click to switch to dry run."}`}
+        className={`inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-line py-1 pl-2 pr-3 text-left transition-colors hover:bg-surface ${className}`}
       >
         <span aria-hidden className={`relative h-5 w-8 shrink-0 rounded-full transition-colors ${dryRun ? "bg-surface-2" : "bg-accent"}`}>
           <span className={`absolute top-0.5 size-4 rounded-full transition-[left] ${dryRun ? "left-0.5 bg-muted" : "left-3.5 bg-accent-ink"}`} />
@@ -77,7 +92,7 @@ export function DryRunToggle({ className = "" }: { className?: string }) {
         </span>
       </button>
       <span id={id} hidden>
-        {action}
+        {meaning}
       </span>
     </>
   );
@@ -117,7 +132,7 @@ export function NearWalletButton() {
   if (!near)
     return (
       <div className="flex flex-col items-end">
-        <button type="button" onClick={() => void connectNear()} disabled={connecting} className="btn-tactile-accent min-h-11 shrink-0 px-4 text-sm">
+        <button type="button" onClick={() => void connectNear()} disabled={connecting} className="btn-tactile min-h-11 shrink-0 rounded-full border border-line px-4 text-sm font-semibold">
           {connecting ? "Connecting…" : "Connect NEAR"}
         </button>
         {error && (

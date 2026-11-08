@@ -4,8 +4,8 @@ import QRCode from "qrcode";
 import { useEffect, useState } from "react";
 import { KNOWN_MINIMUM_USD, MEMO_CHAINS, type SourceAsset } from "@/lib/assets";
 import { depositAddressToShow } from "@/lib/dryrun";
-import { clock, formatUnits, plainUnits } from "@/lib/format";
-import { quoteDeadline } from "@/lib/oneclick/quote";
+import { clock, dateTime, formatUnits, plainUnits } from "@/lib/format";
+import { addressInactiveAt, quoteDeadline } from "@/lib/oneclick/quote";
 import type { QuoteResponse } from "@/lib/oneclick/types";
 import type { Payer } from "@/lib/pay";
 import { useNow } from "@/lib/useAsync";
@@ -131,6 +131,7 @@ export function DepositPanel({
     );
 
   const refundFee = quote.quote.refundFee ? BigInt(quote.quote.refundFee) : null;
+  const inactiveAt = addressInactiveAt(quote);
   return (
     <div className="flex flex-col gap-3">
       {left !== null && (
@@ -148,6 +149,12 @@ export function DepositPanel({
         {qr && <div className="mx-auto w-44 rounded-lg bg-white p-2" dangerouslySetInnerHTML={{ __html: qr }} />}
         <Field label="Amount" value={`${plainUnits(amount, asset.decimals)} ${asset.symbol}`} copy={plainUnits(amount, asset.decimals)} />
         <Field label="One-time deposit address" value={address} copy={address} mono />
+        {deadline !== null && (
+          <p className="text-xs leading-5 text-muted">
+            {`Refund deadline ${dateTime(deadline)}: a deposit after it is refunded, minus the refund fee.`}
+            {inactiveAt !== null && inactiveAt > deadline ? ` The address goes inactive later, at ${dateTime(inactiveAt)}: never send to it after that.` : ""}
+          </p>
+        )}
         {memo && (
           <>
             <Field label="Memo / comment (required)" value={memo} copy={memo} mono />

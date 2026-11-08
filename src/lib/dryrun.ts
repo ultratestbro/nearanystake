@@ -4,6 +4,9 @@
 //  2. the deposit address is never rendered from a dry quote or while the mode is on (below);
 //  3. turning the mode off needs a connected NEAR wallet, which then is the only recipient.
 // Connecting a wallet turns it off by itself, unless the user picked dry run before (initialDryRun).
+// Two places print a live quote's deposit address outside any pay control, on purpose: the "swap
+// failed" notice (1Click support looks the swap up by it) and the signed quote in Recent activity,
+// which hides it while dry run is on and the quote could still be paid.
 
 import type { QuoteResponse } from "./oneclick/types";
 

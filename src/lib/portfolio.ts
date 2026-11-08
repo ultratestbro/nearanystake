@@ -134,7 +134,9 @@ export function activityStatus(r: HistoryRecord, now: number): { label: string; 
   if (r.dry) return { label: "Dry run", tone: "neutral" };
   switch (r.status) {
     case "SUCCESS":
-      return r.kind === "stake-in" && !r.staked ? { label: "Needs your signature", tone: "attention" } : { label: "Done", tone: "success" };
+      if (r.kind !== "stake-in" || r.staked) return { label: "Done", tone: "success" };
+      // a stake was signed and its result never confirmed: it may have landed, so check before signing again
+      return r.stakeAttemptAt ? { label: "Check your stake", tone: "attention" } : { label: "Needs your signature", tone: "attention" };
     case "REFUNDED":
       return { label: "Refunded", tone: "danger" };
     case "FAILED":

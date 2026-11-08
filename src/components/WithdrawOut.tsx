@@ -209,7 +209,14 @@ export function WithdrawOut({ onInFlight }: { onInFlight?: (inFlight: boolean) =
       </div>
       <label className="flex flex-col gap-1.5">
         <span className="text-sm text-muted">Your address on {dest?.chainLabel}</span>
-        <input value={recipient} onChange={(e) => edit(setRecipient)(e.target.value)} disabled={sent} spellCheck={false} autoComplete="off" className={`${field} font-mono text-sm`} />
+        <input
+          value={recipient}
+          onChange={(e) => {
+            edit(setRecipient)(e.target.value);
+            // a ticked "my own wallet" vouched for the old address, not this one
+            if (!sent) setOwn(false);
+          }}
+          disabled={sent} spellCheck={false} autoComplete="off" className={`${field} font-mono text-sm`} />
       </label>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {dest?.family && (

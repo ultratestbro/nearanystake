@@ -28,8 +28,9 @@ const WARN_TEXT: Record<string, { label: string; hint: string }> = {
 /** 0 staked, 1 unstaking, 2 ready to withdraw (3, back on the account, is where a withdrawal ends). */
 type Stage = 0 | 1 | 2;
 
-const btn = "btn-tactile min-h-11 px-5 text-[15px] font-medium";
-const btnAccent = "btn-tactile-accent min-h-11 px-5 text-[15px]";
+// full width on phones, like the other actions there
+const btn = "btn-tactile min-h-11 w-full justify-center px-5 text-[15px] font-medium sm:w-auto";
+const btnAccent = "btn-tactile-accent min-h-11 w-full justify-center px-5 text-[15px] sm:w-auto";
 
 function hoursToUnlock(epoch: NearEpoch | undefined, now: number): number | null {
   return epoch ? Math.max(1, Math.round((unbondingWindow(epoch).at - now) / 3_600_000)) : null;
@@ -114,7 +115,7 @@ function Frame({
           <ClockIcon className="mt-0.5" />
           <div className="min-w-0">{hint}</div>
         </div>
-        <div className="flex flex-wrap gap-2">{actions}</div>
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">{actions}</div>
       </div>
     </article>
   );
@@ -128,7 +129,13 @@ function Status({ tone, pulse, children }: { tone: StatusTone; pulse?: boolean; 
   );
 }
 
-export function NativePositionCard({ p, native, readOnly, account, epoch, price, onDone }: { p: NearPoolPosition; native: NativeStaking; readOnly: boolean; account: string; epoch: NearEpoch | undefined; price: number | null; onDone: () => void }) {
+export function NativePositionCard({
+  p, native, readOnly, account, epoch, price, onDone, quietWithdraw = false,
+}: {
+  p: NearPoolPosition; native: NativeStaking; readOnly: boolean; account: string; epoch: NearEpoch | undefined; price: number | null; onDone: () => void;
+  /** The page's hero already offers Withdraw as its one primary action. */
+  quietWithdraw?: boolean;
+}) {
   const [modal, setModal] = useState<"unstake" | "claim" | null>(null);
   const now = useNow(30_000);
   const name = poolName(p.pool);
@@ -218,8 +225,8 @@ export function NativePositionCard({ p, native, readOnly, account, epoch, price,
         actions={
           <>
             {ready > 0n && (
-              <button type="button" onClick={() => setModal("claim")} className={btnAccent}>
-                Withdraw {formatNear(ready, 3)}
+              <button type="button" onClick={() => setModal("claim")} className={quietWithdraw ? btn : btnAccent}>
+                Withdraw {formatNear(ready)}
               </button>
             )}
             {/* still locked: the dialog previews the withdrawal and says when it unlocks */}

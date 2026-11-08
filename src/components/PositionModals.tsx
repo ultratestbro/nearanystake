@@ -180,13 +180,15 @@ export function ClaimModal({ native, readOnly, account, onClose, onDone }: { nat
   };
 
   return (
-    <Modal title="Withdraw unstaked NEAR" onClose={onClose}>
+    <Modal title="Withdraw unlocked NEAR" onClose={onClose}>
       <div className="flex flex-col gap-3">
         {busy && !q && <Spinner />}
         {q && (
           <>
             <TxPreview transactions={q.transactions} />
+            {q.claims.length > 1 && <p className="text-sm text-muted">This withdraws the unlocked NEAR of every pool, in one approval.</p>}
             <Rows>
+              {q.claims.length > 1 && q.claims.map((c) => <Row key={c.pool} label={`From ${poolName(c.pool)}`}>{formatNear(c.amount)}</Row>)}
               <Row label="To your account">{formatNear(q.amount)}</Row>
               <Row label="Network fee" hint={`${formatNear(q.upfront, 4)} held back for gas while it runs, refunded`}>
                 at most {formatNear(q.fee, 5)}

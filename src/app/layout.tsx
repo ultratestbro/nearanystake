@@ -43,18 +43,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           </header>
           <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:py-8">{children}</main>
           <footer className="border-t border-line">
-            <div className="mx-auto flex max-w-6xl flex-col gap-1.5 px-4 py-6 text-xs text-muted">
+            <div className="mx-auto flex max-w-6xl flex-wrap justify-between gap-x-6 gap-y-2 px-4 py-6 text-[13px] leading-5 text-muted">
+              <p>Non-custodial: NEAR goes straight to your own account. No NearAnyStake contract holds funds.</p>
               <p>
-                NearAnyStake is an independent project built for the NEAR Hackathon 2026. Cross-chain deposits route through NEAR Intents (1Click);
-                staking through{" "}
-                <a className="underline" href="https://docs.anywallet.tech">
+                Swaps by NEAR Intents · Staking by NEAR validator pools · Built with{" "}
+                <a className="underline underline-offset-2 hover:text-text" href="https://docs.anywallet.tech">
                   Any Wallet Kit
-                </a>{" "}
-                staking modules. Non-custodial: the app never holds keys or funds.
-              </p>
-              <p>
-                Staking reads, quotes and transactions come from <code>@anywalletkit/protocol-staking-native-near</code> and{" "}
-                <code>@anywalletkit/protocol-staking-liquid-near</code> (pre-release builds from the <code>feat/near-staking</code> branch).
+                </a>
               </p>
             </div>
           </footer>
