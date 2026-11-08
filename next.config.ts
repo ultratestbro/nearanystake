@@ -24,8 +24,10 @@ const nextConfig: NextConfig = {
   },
   // Positions and History moved into Portfolio; old links and bookmarks keep working (the query,
   // e.g. ?view=demo, is passed through). Temporary, so browsers don't cache them for good.
+  // The app lives on nearanystake.xyz: the old production alias forwards there (deployment URLs don't).
   async redirects() {
     return [
+      { source: "/:path*", has: [{ type: "host", value: "nearanystake.vercel.app" }], destination: "https://nearanystake.xyz/:path*", permanent: false },
       { source: "/positions", destination: "/portfolio", permanent: false },
       { source: "/history", destination: "/portfolio#activity", permanent: false },
     ];
