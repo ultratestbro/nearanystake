@@ -5,6 +5,8 @@
 mints Rhea rNEAR / LiNEAR. Later, unstake with a live epoch countdown, withdraw, and send the NEAR back out to any
 chain.
 
+- **Live:** https://nearanystake.vercel.app (NEAR mainnet; dry-run mode until you connect a NEAR wallet)
+
 Built for the NEAR Hackathon 2026, tracks **DeFi** and **Open**. Non-custodial: no contract of ours, no server
 holding funds or keys. The app never sees a private key.
 
