@@ -792,9 +792,16 @@ function QuoteAndTrack({
   data: TargetData;
   epoch: NearEpoch | null;
 }) {
-  const { dryRun, near, demo } = useApp();
+  const { dryRun, near, demo, setDryRun, connectNear } = useApp();
   const res = quote.res;
   const isDry = quote.req.dry;
+  // from a simulation straight to a real quote for the same amount (the form keeps it)
+  const goLive = async () => {
+    if (!near) {
+      if (!(await connectNear())) return;
+    } else setDryRun(false);
+    onRestart();
+  };
   const now = useNow(1000);
   const [liveStatus, setStatus] = useState<StatusResponse | null>(null);
   const [sim, setSim] = useState<{ outcome: SimOutcome; step: number; startedAt: number } | null>(null);
@@ -1132,7 +1139,7 @@ function QuoteAndTrack({
           : {
               id: "source",
               state: states.source,
-              title: `We got your ${amountInText}`,
+              title: sim ? `Payment of ${amountInText} (simulated)` : `We got your ${amountInText}`,
               detail: (
                 <>
                   {fromText}
@@ -1147,7 +1154,9 @@ function QuoteAndTrack({
     state: states.intents,
     title:
       states.intents === "done"
-        ? `Swapped to ${unit}`
+        ? sim
+          ? `Swap to ${unit} (simulated)`
+          : `Swapped to ${unit}`
         : phase === "deposit-detected"
           ? "Confirming your deposit"
           : phase === "processing"
@@ -1181,12 +1190,12 @@ function QuoteAndTrack({
           state: "done",
           title: (
             <>
-              Delivered {nearAmount(arrived)} {unit} to <span className="font-mono font-medium">{shortAccount(recipient)}</span>
+              {sim ? "Would deliver" : "Delivered"} {nearAmount(arrived)} {unit} to <span className="font-mono font-medium">{shortAccount(recipient)}</span>
             </>
           ),
           detail: (
             <>
-              {!instant && kept.data !== undefined && kept.data > 0n && `≈ ${nearAmount(kept.data)} NEAR stays for gas`}
+              {!instant && kept.data !== undefined && kept.data > 0n && `≈ ${nearAmount(kept.data)} NEAR ${sim ? "would stay" : "stays"} for gas`}
               {!instant && kept.data !== undefined && kept.data > 0n && deliveryHash && " · "}
               {deliveryHash && <ExplorerLink chain="near:mainnet" hash={deliveryHash} />}
             </>
@@ -1229,7 +1238,7 @@ function QuoteAndTrack({
               boxed: stake !== "done",
               time: stepTime("pool"),
               body: (
-                <StakeStep target={target} recipient={recipient} status={status} simulated={!!sim} flowId={quote.flowId} attemptedAt={record?.stakeAttemptAt ?? null} stake={stake} setStake={setStake} apr={tv.apr} />
+                <StakeStep target={target} recipient={recipient} status={status} simulated={!!sim} onGoLive={sim ? goLive : undefined} flowId={quote.flowId} attemptedAt={record?.stakeAttemptAt ?? null} stake={stake} setStake={setStake} apr={tv.apr} />
               ),
             }
           : { id: "pool", state: states.pool, title: "Sign once to stake", detail: `${cap(walletName)} asks you to confirm. It stakes exactly what arrived.` },
@@ -1254,8 +1263,9 @@ function QuoteAndTrack({
         : `${tv.short} grows in NEAR value every epoch`,
   });
 
-  const badge: { label: string; tone: StatusTone; pulse?: boolean } =
-    phase === "unknown"
+  const badge: { label: string; tone: StatusTone; pulse?: boolean } = sim
+    ? { label: "Simulation", tone: "neutral" }
+    : phase === "unknown"
       ? { label: "Checking", tone: "neutral" }
       : phase === "awaiting-deposit"
         ? isDry
@@ -1323,13 +1333,13 @@ function QuoteAndTrack({
       id="track-title"
       heading="h1"
       wide
-      title={instant ? `Getting stNEAR for ${amountInText}` : `Staking ${amountInText}`}
+      title={sim ? `Simulated stake of ${amountInText}` : instant ? `Getting stNEAR for ${amountInText}` : `Staking ${amountInText}`}
       sub={
         <>
           {instant
             ? `≈ ${nearAmount(out)} stNEAR to ${shortAccount(recipient)}`
             : `${stakedFinal !== null ? "" : "≈ "}${nearAmount(stakedShown ?? out)} NEAR into ${tv.short}${tv.apr !== null ? ` · ${percent(tv.apr)} APR` : ""}`}
-          {sim && <span className="block text-[13px] text-warn">Simulated statuses · dry run, nothing is sent</span>}
+          {sim && <span className="block text-[13px] text-warn">Simulation: nothing is paid, delivered or staked</span>}
         </>
       }
       right={
@@ -1485,6 +1495,7 @@ function StakeStep({
   recipient,
   status,
   simulated,
+  onGoLive,
   flowId,
   attemptedAt,
   stake,
@@ -1495,6 +1506,8 @@ function StakeStep({
   recipient: string;
   status: StatusResponse | null;
   simulated: boolean;
+  /** Simulation only: leave it for a real quote (switch to Live, or connect a wallet first). */
+  onGoLive?: () => Promise<void>;
   flowId: string;
   /** A stake was signed for this delivery earlier and its result was never confirmed (from History). */
   attemptedAt: number | null;
@@ -1645,10 +1658,16 @@ function StakeStep({
     <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4">
       <div>
         <p className="text-base font-semibold leading-6">
-          <span className="sr-only">Your turn: </span>NEAR arrived — sign to stake {willStake ?? "it"}
+          {simulated ? (
+            <>In a live run: sign to stake {willStake ?? "it"}</>
+          ) : (
+            <>
+              <span className="sr-only">Your turn: </span>NEAR arrived — sign to stake {willStake ?? "it"}
+            </>
+          )}
         </p>
         <p className="mt-1 text-sm leading-5 text-muted">
-          {signing ? `${cap(walletName)} opens and asks you to confirm. ` : ""}It stakes into {short}
+          {signing ? `${cap(walletName)} opens and asks you to confirm. ` : ""}It {simulated ? "would stake" : "stakes"} into {short}
           {shownApr !== null ? ` at ${percent(shownApr)} APR` : ""}.
         </p>
       </div>
@@ -1690,25 +1709,31 @@ function StakeStep({
           {simulated ? " In a live run the delivery itself funds the stake." : ""}
         </Notice>
       )}
-      <button
-        type="button"
-        onClick={() => void sign()}
-        disabled={!signing || !preflight || stake === "signing" || busy || blocked}
-        className={`${CTA} ${signing ? "" : "disabled:bg-surface disabled:text-muted disabled:opacity-100 disabled:shadow-none"}`}
-        title={signing ? undefined : "Dry run / demo account: nothing to sign"}
-      >
-        {stake === "signing"
-          ? "Confirm in your wallet…"
-          : signing
-            ? `Sign and stake${willStake ? ` ${willStake}` : ""} in ${walletName}`
-            : simulated
-              ? "Sign and stake (live runs only)"
-              : "Sign and stake"}
-      </button>
+      {simulated && onGoLive ? (
+        <button type="button" onClick={() => void onGoLive()} className={CTA}>
+          {near ? "Stake for real: switch to Live" : "Connect NEAR wallet to stake for real"}
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void sign()}
+          disabled={!signing || !preflight || stake === "signing" || busy || blocked}
+          className={`${CTA} ${signing ? "" : "disabled:bg-surface disabled:text-muted disabled:opacity-100 disabled:shadow-none"}`}
+          title={signing ? undefined : "Dry run / demo account: nothing to sign"}
+        >
+          {stake === "signing"
+            ? "Confirm in your wallet…"
+            : signing
+              ? `Sign and stake${willStake ? ` ${willStake}` : ""} in ${walletName}`
+              : simulated
+                ? "Sign and stake (live runs only)"
+                : "Sign and stake"}
+        </button>
+      )}
       {!signing && (
         <p className="text-[13px] leading-5 text-muted">
           {simulated
-            ? "Dry run: nothing to sign. In a live run your NEAR wallet asks you to confirm here."
+            ? "Nothing was paid or delivered. A live quote for the same amount costs nothing; you pay only after you confirm in your wallet."
             : near
               ? `This stake is for ${shortAccount(recipient)}: connect that account to sign.`
               : `Connect the NEAR wallet for ${shortAccount(recipient)} to sign.`}
@@ -1729,9 +1754,11 @@ function StakeStep({
             </p>
           </Disclosure>
         )}
-        <button type="button" onClick={() => void runPreflight()} disabled={busy || stake === "signing"} className={`${QUIET} absolute -right-2 top-0`}>
-          {busy ? "Checking…" : "Check again"}
-        </button>
+        {!simulated && (
+          <button type="button" onClick={() => void runPreflight()} disabled={busy || stake === "signing"} className={`${QUIET} absolute -right-2 top-0`}>
+            {busy ? "Checking…" : "Check again"}
+          </button>
+        )}
       </div>
     </div>
   );
