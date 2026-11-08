@@ -22,13 +22,21 @@ describe("dry-run guard", () => {
     expect(depositAddressToShow(live, false)).toBe("0x62F099A5C804f165351eE84CA41239b4283fAe1a");
   });
 
-  it("live mode needs a NEAR account; without a wallet the app starts dry", () => {
+  it("live mode needs a NEAR account; without a wallet the app is always dry", () => {
     expect(canGoLive(null)).toBe(false);
+    expect(canGoLive("")).toBe(false);
     expect(canGoLive("alice.near")).toBe(true);
+    expect(initialDryRun(null, null)).toBe(true);
     expect(initialDryRun(null, false)).toBe(true);
-    // connecting a wallet does not make quotes payable by itself (audit L15): only the switch does
-    expect(initialDryRun("alice.near", null)).toBe(true);
-    expect(initialDryRun("alice.near", true)).toBe(true);
+    expect(initialDryRun(null, true)).toBe(true);
+    expect(initialDryRun("", false)).toBe(true);
+  });
+
+  it("a connected wallet goes live unless the user chose dry run before", () => {
+    // owner decision (replaces audit L15's "dry until the switch"): connecting is the opt-in;
+    // the deposit-address and `dry: false` guards above still hold in either mode
+    expect(initialDryRun("alice.near", null)).toBe(false);
     expect(initialDryRun("alice.near", false)).toBe(false);
+    expect(initialDryRun("alice.near", true)).toBe(true);
   });
 });

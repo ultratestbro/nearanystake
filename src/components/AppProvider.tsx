@@ -23,9 +23,16 @@ interface AppState {
   restoring: boolean;
   connecting: boolean;
   error: string;
-  connectNear(): Promise<NearConnection | null>;
+  /**
+   * Opens the wallet picker. The mode then follows initialDryRun; `live: true` is for a control that
+   * offered "connect to go live": that click is the user's newest choice, so it is remembered.
+   */
+  connectNear(opts?: { live?: boolean }): Promise<NearConnection | null>;
   disconnectNear(): void;
-  /** App-wide dry-run switch: real quotes, nothing payable. */
+  /**
+   * App-wide dry-run switch: real quotes, nothing payable. Always on without a NEAR wallet; off once
+   * one connects, unless the user switched it on before (see initialDryRun).
+   */
   dryRun: boolean;
   setDryRun(v: boolean): void;
   /** The read-only demo account (a public delegator with an unbonding balance). */
@@ -41,12 +48,21 @@ export function useApp(): AppState {
   return v;
 }
 
+/** The user's last pick of the switch in this browser: true = dry run ("1"), null = never picked. */
 function remembered(): boolean | null {
   try {
     const v = localStorage.getItem(DRY_KEY);
     return v === null ? null : v === "1";
   } catch {
     return null;
+  }
+}
+
+function remember(dry: boolean) {
+  try {
+    localStorage.setItem(DRY_KEY, dry ? "1" : "0");
+  } catch {
+    // private mode: the choice lasts until reload
   }
 }
 
@@ -119,12 +135,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [nearId, open]);
 
-  const connectNear = useCallback(async () => {
+  const connectNear = useCallback(async (opts?: { live?: boolean }) => {
     setError("");
     setConnecting(true);
     try {
       const c = await open(false);
       setNear(c);
+      if (opts?.live === true) remember(false);
       setDry(initialDryRun(c.accountId, remembered()));
       return c;
     } catch (e) {
@@ -147,11 +164,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       // live quotes need a NEAR account to deliver to: without one the switch stays on
       if (!v && !canGoLive(near?.accountId ?? null)) return;
       setDry(v);
-      try {
-        localStorage.setItem(DRY_KEY, v ? "1" : "0");
-      } catch {
-        // private mode: the choice lasts until reload
-      }
+      remember(v);
     },
     [near],
   );

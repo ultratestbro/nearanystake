@@ -3,6 +3,7 @@
 //  1. the 1Click client refuses to POST `dry: false` while the mode is on (oneclick/client.ts);
 //  2. the deposit address is never rendered from a dry quote or while the mode is on (below);
 //  3. turning the mode off needs a connected NEAR wallet, which then is the only recipient.
+// Connecting a wallet turns it off by itself, unless the user picked dry run before (initialDryRun).
 
 import type { QuoteResponse } from "./oneclick/types";
 
@@ -19,12 +20,12 @@ export function canGoLive(nearAccount: string | null): boolean {
 }
 
 /**
- * The mode a page starts in: dry, also after a wallet connects. Only the user's own choice of the
- * switch (remembered in this browser) makes quotes payable.
+ * The mode after a NEAR wallet connects (or reconnects): live, unless the user switched to dry run
+ * before (remembered `true` in this browser). Without a wallet it is always dry.
  */
 export function initialDryRun(nearAccount: string | null, remembered: boolean | null): boolean {
-  if (!nearAccount) return true;
-  return remembered ?? true;
+  if (!canGoLive(nearAccount)) return true;
+  return remembered === true;
 }
 
 /**
