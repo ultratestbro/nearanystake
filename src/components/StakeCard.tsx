@@ -2,7 +2,7 @@
 
 // Presentational pieces of the Stake card (direction A, "swap card"): one card that reads
 // You pay → You stake into → You get → Details → one primary action (side by side from lg: the
-// inputs left, the result and the action right), and turns into the tracker once money moves.
+// inputs and Details left, You get and the action right), and turns into the tracker once money moves.
 // No state here: StakeFlow owns it and passes data in.
 
 import { useRef, type ReactNode } from "react";
@@ -39,23 +39,46 @@ export function StakeIntro() {
   );
 }
 
-/** The stake form's card: one column on phones and tablets, two from lg (inputs left, result and action right). */
-const FORM_CARD = "mx-auto w-full max-w-[520px] rounded-3xl border border-line bg-panel p-4 sm:p-5 lg:max-w-[1040px] lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:gap-x-6";
+/**
+ * The stake form's card: one column on phones and tablets, two from lg. Rows from lg: You pay | You get,
+ * then You stake into | the action (which spans the rest), then Details under the inputs, then a
+ * flexible row only the action reaches, so a tall action grows the card instead of the left rows.
+ */
+const FORM_CARD =
+  "mx-auto w-full max-w-[520px] rounded-3xl border border-line bg-panel p-4 sm:p-5 lg:grid lg:max-w-[1040px] lg:grid-cols-[minmax(0,1fr)_380px] lg:grid-rows-[auto_auto_auto_1fr] lg:gap-x-6";
+const AT = {
+  pay: "flex min-w-0 flex-col lg:col-start-1 lg:row-start-1",
+  into: "min-w-0 lg:col-start-1 lg:row-start-2",
+  // stretched to the You pay box's height (the connector under that box matches this margin)
+  summary: "mt-2 grid min-w-0 lg:col-start-2 lg:row-start-1 lg:mb-2 lg:mt-0",
+  details: "mt-3 min-w-0 lg:col-start-1 lg:row-start-3",
+  action: "mt-3 min-w-0 lg:col-start-2 lg:row-start-2 lg:row-span-3 lg:mt-0",
+};
 
-/** What the server sends before the flow (which reads the URL) renders in the browser: the form's two columns. */
+/** What the server sends before the flow (which reads the URL) renders in the browser: the form's shape. */
 export function StakeFallback() {
   return (
     <>
       <StakeIntro />
-      <div aria-busy="true" className={`${FORM_CARD} lg:grid`}>
-        <div className="flex flex-col gap-2">
-          <Skeleton className="h-36 w-full rounded-2xl" />
-          <Skeleton className="h-52 w-full rounded-2xl" />
+      <div aria-busy="true" className={FORM_CARD}>
+        {/* the heights of the no-wallet form, so nothing jumps when it mounts */}
+        <div className={AT.pay}>
+          <Skeleton className="h-[144px] w-full rounded-2xl" />
+          <div className="h-2" />
         </div>
-        <div className="mt-2 flex flex-col gap-3 lg:mt-0">
-          <Skeleton className="h-32 w-full rounded-2xl" />
-          <Skeleton className="h-12 w-full rounded-2xl" />
+        <div className={AT.into}>
+          <Skeleton className="h-[202px] w-full rounded-2xl sm:h-[200px]" />
+        </div>
+        <div className={AT.summary}>
+          <Skeleton className="h-[141px] w-full rounded-2xl lg:h-full" />
+        </div>
+        <div className={AT.details}>
+          <Skeleton className="h-[50px] w-full rounded-2xl" />
+        </div>
+        <div className={AT.action}>
           <Skeleton className="h-14 w-full rounded-[14px]" />
+          <Skeleton className="mt-2 h-12 w-full rounded-[14px]" />
+          <Skeleton className="mx-auto mt-2.5 h-6 w-44" />
         </div>
         <span className="sr-only">Loading the stake form…</span>
       </div>
@@ -64,18 +87,22 @@ export function StakeFallback() {
 }
 
 /**
- * The setup and quote card: `inputs` (You pay → You stake into) and `result` (You get, Details, the
- * action). From lg the result column sits beside the inputs and stays in view while they grow.
- * `aside` (other choices) follows the result on phones and sits under the inputs from lg; `footer`
- * (a way back) closes the card on phones and sits under the result from lg.
+ * The setup and quote card, in reading order: You pay → You stake into → You get → Details → the action.
+ * Phones and tablets show that order in one column. From lg the inputs and Details make the left column
+ * and You get with the action the right one, so opening Details (a refund address, the own-wallet
+ * confirmation) never pushes the action down.
  */
-export function FormCard({ label, inputs, result, aside, footer }: { label: string; inputs: ReactNode; result: ReactNode; aside?: ReactNode; footer?: ReactNode }) {
+export function FormCard({ label, pay, into, summary, details, action }: { label: string; pay: ReactNode; into: ReactNode; summary: ReactNode; details: ReactNode; action: ReactNode }) {
   return (
-    <section aria-label={label} className={`${FORM_CARD} lg:grid`}>
-      <div className="min-w-0 lg:col-start-1 lg:row-start-1">{inputs}</div>
-      <div className="mt-2 min-w-0 lg:sticky lg:top-4 lg:col-start-2 lg:row-start-1 lg:mt-0">{result}</div>
-      {aside && <div className="mt-3 min-w-0 lg:col-start-1 lg:row-start-2 lg:mt-4">{aside}</div>}
-      {footer && <div className="mt-1 min-w-0 lg:col-start-2 lg:row-start-2 lg:mt-2">{footer}</div>}
+    <section aria-label={label} className={FORM_CARD}>
+      <div className={AT.pay}>
+        <div className="grid flex-1">{pay}</div>
+        <Connector />
+      </div>
+      <div className={AT.into}>{into}</div>
+      <div className={AT.summary}>{summary}</div>
+      <div className={AT.details}>{details}</div>
+      <div className={AT.action}>{action}</div>
     </section>
   );
 }
@@ -115,10 +142,13 @@ export function CardShell({
   );
 }
 
-/** The one muted line under the action: the mode (dot + word), a few words on what follows, the rest in a hint. */
+/**
+ * The one muted line under the action: the mode (dot + word), a few words on what follows, the rest in a
+ * hint. Its top margin keeps the hint's 44 px hit area off the button above.
+ */
 export function ModeLine({ live, children, hint, hintLabel = "What happens next" }: { live: boolean; children: ReactNode; hint?: string; hintLabel?: string }) {
   return (
-    <p className="mt-1 flex min-h-6 flex-wrap items-center justify-center gap-x-2 text-center text-[13px] leading-5 text-muted">
+    <p className="mt-2.5 flex min-h-6 flex-wrap items-center justify-center gap-x-2 text-center text-[13px] leading-5 text-muted">
       <span aria-hidden className={`size-2 shrink-0 rounded-full ${live ? "bg-accent" : "bg-muted"}`} />
       <span className="text-pretty">{children}</span>
       {hint && (

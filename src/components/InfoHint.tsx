@@ -135,7 +135,8 @@ export function InfoHint({
         className={
           trigger
             ? `inline-flex max-w-full cursor-help items-center rounded-full ${className}`
-            : `relative inline-grid size-6 shrink-0 cursor-help place-items-center rounded-full align-middle text-muted hover:text-text after:absolute after:-inset-2 after:content-[''] ${className}`
+            : // 24 px icon, 44 px hit area
+              `relative inline-grid size-6 shrink-0 cursor-help place-items-center rounded-full align-middle text-muted hover:text-text after:absolute after:-inset-2.5 after:content-[''] ${className}`
         }
       >
         {trigger ?? <InfoIcon size={16} />}
