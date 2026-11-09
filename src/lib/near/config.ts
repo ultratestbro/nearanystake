@@ -1,4 +1,4 @@
-import type { NearProvider } from "@anywalletkit/wallet-near";
+import { NearRpcError, createClient, type NearFetch, type NearProvider } from "@anywalletkit/wallet-near";
 
 export type NearNetwork = "mainnet" | "testnet";
 
@@ -17,8 +17,29 @@ export const FALLBACK_RPC = "https://near.drpc.org";
  * modules check pool ids and code hashes locally.
  */
 export function nearProviders(): NearProvider[] {
-  if (typeof window === "undefined") return [PUBLIC_RPC, FALLBACK_RPC];
+  if (typeof window === "undefined") return [serverClient()];
   return [`${window.location.origin}/api/rpc/near`, PUBLIC_RPC, FALLBACK_RPC];
+}
+
+/**
+ * Outside the browser (`pnpm e2e`) there is no proxy, so this does what the proxy does: fail over
+ * between its three nodes, and when all of them refuse, pause and go round again. One pass is not
+ * enough: both FastNEAR nodes answer 429 together (one per-IP limit), and dRPC often answers
+ * `gas_price` with UNKNOWN_BLOCK (HTTP 422). The server never signs, so every call here is a read.
+ */
+function serverClient(): NearFetch {
+  const client = createClient({ provider: [PUBLIC_RPC, "https://rpc.mainnet.fastnear.com", FALLBACK_RPC] })!;
+  return async (method, params) => {
+    for (let pass = 1; ; pass++) {
+      try {
+        return await client(method, params);
+      } catch (e) {
+        // a node's own answer (unknown account, a failed view call) is final; only "every node refused" is retried
+        if (e instanceof NearRpcError || pass === 3) throw e;
+        await new Promise((r) => setTimeout(r, pass * 1_000));
+      }
+    }
+  };
 }
 
 /** A public account with NEAR in a staking pool, read-only: the demo for judges (a third party's account, never the author's). */

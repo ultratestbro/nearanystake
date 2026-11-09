@@ -221,6 +221,9 @@ pnpm e2e            # read-only on mainnet: epoch, validators and the allow-list
                     # dry 1Click quotes from Base USDC / Solana SOL / Tron USDT with the echo check, a deposit_and_stake
                     # built (not sent) for the delivered amount, and the dry-run simulated stake's preview on the demo account.
                     # View calls and dry quotes only; E2E_REPORT=file.json saves a report
+                    # Uses free public NEAR nodes: a rate-limited read pauses and goes round them again, and a failed test
+                    # reruns twice. A 429 that still gets through is transient: rerun it, or start it as
+                    # NEXT_PUBLIC_NEAR_RPC_URL=<your NEAR node> pnpm e2e
 pnpm typecheck && pnpm lint && pnpm build   # typecheck runs `next typegen` first, so it works on a fresh clone
 ```
 

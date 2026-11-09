@@ -12,5 +12,7 @@ export default defineConfig({
     testTimeout: 240_000,
     hookTimeout: 240_000,
     fileParallelism: false,
+    // public nodes rate-limit now and then: a failed test reruns after a pause instead of failing the run
+    retry: { count: 2, delay: 3_000 },
   },
 });
