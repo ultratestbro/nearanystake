@@ -1,8 +1,9 @@
 /**
  * Read-mostly JSON-RPC proxy for the browser. NEAR: view calls only, with the 375 KB `validators`
- * answer cached for a minute (critique: never hammer the public node from every visitor). Solana and
- * TON: the calls their deposit builders need. NEAR wallets broadcast on their own, so no NEAR send
- * method is allowed here.
+ * answer cached for a minute, so the public node's rate limit is spent once per minute instead of once
+ * per visitor. Solana and TON: the calls their deposit builders need (for Solana that includes
+ * `sendTransaction`, which broadcasts the deposit the user's wallet signed). NEAR wallets broadcast on
+ * their own, so no NEAR send method is allowed here.
  */
 const NEAR_METHODS = new Set(["query", "validators", "block", "gas_price", "status", "tx", "EXPERIMENTAL_tx_status", "EXPERIMENTAL_protocol_config"]);
 const NEAR_QUERY_TYPES = new Set(["view_account", "call_function", "view_access_key"]);

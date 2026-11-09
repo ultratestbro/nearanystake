@@ -21,7 +21,7 @@ export function nearProviders(): NearProvider[] {
   return [`${window.location.origin}/api/rpc/near`, PUBLIC_RPC, FALLBACK_RPC];
 }
 
-/** A public delegator with an unbonding balance: the read-only demo for judges (never the author's account). */
+/** A public account with NEAR in a staking pool, read-only: the demo for judges (a third party's account, never the author's). */
 export const DEMO_ACCOUNT = process.env.NEXT_PUBLIC_DEMO_ACCOUNT || "nima.near";
 
 /** Suggested pool when the user has not picked one (a 1 % fee pool); the picker lists every eligible one. */

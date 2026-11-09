@@ -32,7 +32,7 @@ describe("portfolio figures", () => {
     expect(compactNear(0n)).toBe("0 NEAR");
   });
 
-  it("yearly reward stays bigint and matches the brief's example", () => {
+  it("yearly reward stays bigint and matches a worked example", () => {
     // 1.29 NEAR at 5.02 % ≈ 0.065 NEAR
     expect(yearlyReward(near("1.29"), 5.02)).toBe((near("1.29") * 502n) / 10_000n);
     expect(yearlyReward(near("1"), null)).toBeNull();

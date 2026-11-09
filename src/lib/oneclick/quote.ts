@@ -1,6 +1,6 @@
 // Builds the 1Click quote requests this app sends and checks what comes back.
 //
-// Two rules hold for every request (critique #5, #10):
+// Two rules hold for every request:
 //  - the NEAR side is always the connected account: inbound it is the recipient, outbound the refund
 //    address. There is no field where someone types a NEAR recipient.
 //  - `customRecipientMsg` is never set. With it 1Click delivers through ft_transfer_call, and none of

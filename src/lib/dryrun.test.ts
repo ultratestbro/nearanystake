@@ -33,7 +33,7 @@ describe("dry-run guard", () => {
   });
 
   it("a connected wallet goes live unless the user chose dry run before", () => {
-    // owner decision (replaces audit L15's "dry until the switch"): connecting is the opt-in;
+    // connecting a wallet is itself the opt-in to live mode (no second click on the header switch);
     // the deposit-address and `dry: false` guards above still hold in either mode
     expect(initialDryRun("alice.near", null)).toBe(false);
     expect(initialDryRun("alice.near", false)).toBe(false);

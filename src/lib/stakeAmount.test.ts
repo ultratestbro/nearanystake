@@ -12,7 +12,7 @@ describe("stake only what was delivered", () => {
     expect(r).toEqual({ amount: delivered, basis: "reported", mismatch: false, capped: false, tooSmall: false });
   });
 
-  it("uses the lower of the NEAR transaction and 1Click's report: neither can inflate the stake (audit L7)", () => {
+  it("uses the lower of the NEAR transaction and 1Click's report: neither can inflate the stake", () => {
     const r = stakeAmountAfterDelivery({ reported: 800n * 10n ** 21n, onChain: 755n * 10n ** 21n, maxStakeable: 10n * NEAR, minStake: MIN });
     expect(r).toMatchObject({ amount: 755n * 10n ** 21n, basis: "on-chain", mismatch: true });
     // a lying proxy (or a batched transaction summed) reports more on chain than 1Click delivered

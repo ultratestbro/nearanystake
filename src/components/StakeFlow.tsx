@@ -1067,7 +1067,7 @@ function QuoteAndTrack({
             label="Quote check"
             hint={
               <InfoHint label="What the quote check covers">
-                {`1Click's answer repeats what this app asked for: recipient ${shortAccount(quote.req.recipient)}, refund ${shortAccount(quote.req.refundTo)}, ${quote.req.destinationAsset}, ${quote.req.recipientType}. The signed quote is saved in Recent activity.`}
+                {`1Click's answer repeats what this app asked for: recipient ${shortAccount(quote.req.recipient)}, refund ${shortAccount(quote.req.refundTo)}, ${quote.req.destinationAsset}, ${quote.req.recipientType}. ${isDry ? "A dry-run quote can't be paid, so there is nothing to keep; a live quote's signed copy is saved in Recent activity." : "The signed quote is saved in Recent activity."}`}
               </InfoHint>
             }
           >
@@ -1160,7 +1160,7 @@ function QuoteAndTrack({
     );
   }
 
-  // ── the tracker (A-progress) ──
+  // ── the tracker ──
   const depositLinks = depositTxHashes(status).map((h) => <ExplorerLink key={h} chain={asset.chain} hash={h} />);
   const deliveryHash = deliveryTxHash(status);
   const fromText = paidAt && payer && payer.family === asset.family ? <>From <span className="font-mono">{shortAccount(payer.address)}</span> on {asset.chainLabel}</> : <>On {asset.chainLabel}</>;
@@ -1484,8 +1484,14 @@ function QuoteAndTrack({
         )}
         {phase === "failed" && (
           <Notice tone="danger" title="1Click reports the swap failed">
-            Check {shortAccount(quote.req.refundTo)} on {asset.chainLabel} for a refund. If nothing arrives, contact 1Click support with the deposit address{" "}
-            <span className="break-all font-mono text-xs">{res.quote.depositAddress}</span>; the signed quote is saved in Recent activity.
+            {isDry ? (
+              "In a live run: check your refund address for a refund. If nothing arrives, contact 1Click support with the deposit address and the signed quote saved in Recent activity."
+            ) : (
+              <>
+                Check {shortAccount(quote.req.refundTo)} on {asset.chainLabel} for a refund. If nothing arrives, contact 1Click support with the deposit address{" "}
+                <span className="break-all font-mono text-xs">{res.quote.depositAddress}</span>; the signed quote is saved in Recent activity.
+              </>
+            )}
           </Notice>
         )}
         {phase === "expired" && (
@@ -1608,7 +1614,7 @@ function StakeStep({
   const [checkedNotStaked, setCheckedNotStaked] = useState(false);
   const once = useRef(false);
 
-  // exactly what was delivered, capped by what the account can spend now (critique #2); read fresh for every preflight
+  // exactly what was delivered, capped by what the account can spend now; read fresh for every preflight
   const computeAmount = useCallback(async (): Promise<StakeAmount> => {
     const reported = reportedDelivery(status);
     const delivery = deliveryTxHash(status);

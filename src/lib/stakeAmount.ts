@@ -1,4 +1,4 @@
-// How much of a delivery gets staked (critique #2): exactly what 1Click delivered for this stake,
+// How much of a delivery gets staked: exactly what 1Click delivered for this stake,
 // never the account's balance. An account that already held 1000 NEAR stakes only the 0.73 it just
 // received. The only cap is what the account can actually spend (available − reserve − fee).
 

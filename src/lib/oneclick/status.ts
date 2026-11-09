@@ -141,7 +141,7 @@ export function fundsView(phase: Phase, c: FundsContext): FundsView {
       tone = "bad";
       break;
     case "failed":
-      headline = "1Click reports that the swap failed. Check your refund address on the source chain; if nothing arrives, contact 1Click support with the deposit address (the signed quote is in History).";
+      headline = "1Click reports that the swap failed. Check your refund address on the source chain; if nothing arrives, contact 1Click support with the deposit address (the signed quote is in Recent activity).";
       tone = "bad";
       break;
     case "expired":

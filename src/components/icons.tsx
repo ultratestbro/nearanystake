@@ -1,4 +1,4 @@
-// Stroke icons for the redesign, drawn on a 24-unit grid like the approved mockups.
+// Stroke icons drawn on a 24-unit grid with round caps and joins, so they match each other at any size.
 // Every icon is decorative (aria-hidden): the button or text next to it carries the meaning, so an
 // icon-only button still needs its own aria-label. Props: `size` in px (default 16), `className`
 // (colour comes from currentColor, e.g. "text-muted").

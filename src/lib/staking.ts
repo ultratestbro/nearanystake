@@ -1,7 +1,7 @@
 // The one place the app touches the Any Wallet Kit staking modules
-// (@anywalletkit/protocol-staking-native-near and -liquid-near, installed from vendor/*.tgz until
-// they are on npm; see vendor/README.md). Components get the module instances themselves: every
-// read, quote and write is the module's, with its fresh, fail-closed checks.
+// (@anywalletkit/protocol-staking-native-near and -liquid-near 0.1.0 from npm). Components get the
+// module instances themselves: every read, quote and write is the module's, with its fresh,
+// fail-closed checks.
 
 import type { IWalletAccount, IWalletAccountReadOnly } from "@anywalletkit/core";
 import {

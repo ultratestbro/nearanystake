@@ -3,7 +3,7 @@ import { evmPayer } from "./evm";
 
 const instr = { chain: "eip155:8453", symbol: "USDC", contract: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6, amount: "5000000", to: "0x62F099A5C804f165351eE84CA41239b4283fAe1a", memo: null, validUntilMs: 0 };
 
-describe("EVM payer binds the chain (L8)", () => {
+describe("EVM payer binds the chain", () => {
   it("refuses when the wallet is still on another network after the switch", async () => {
     const request = vi.fn(async ({ method }: { method: string }) => (method === "eth_chainId" ? "0x1" : null));
     await expect(evmPayer({ request }, "0xabc", "Wallet").pay(instr)).rejects.toThrow(/another network/);

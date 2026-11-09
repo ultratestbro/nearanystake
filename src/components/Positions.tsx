@@ -1,6 +1,6 @@
 "use client";
 
-// The Portfolio (direction C): what is staked and what it earns, what is on its way out, every
+// The Portfolio: what is staked and what it earns, what is on its way out, every
 // position with the action that fits its state, the NEAR left on the account with a way to cash it
 // out, today's rates, and recent activity (passed in as `activity`). Reads are the staking modules';
 // the dialogs are in PositionModals, the cards in PositionCard.
@@ -55,7 +55,7 @@ function DemoNote() {
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-line bg-panel px-4 py-2.5 text-sm">
       <StatusBadge>Demo</StatusBadge>
       <p className="min-w-0 flex-[1_1_16rem] text-muted">
-        <span className="font-mono text-text">{demoId}</span> is a public account with NEAR unstaking. Read-only: preview unstake and withdraw, nothing can be signed.
+        <span className="font-mono text-text">{demoId}</span> is a public account with NEAR in a staking pool. Read-only: nothing can be signed.
       </p>
       {near ? (
         <Link href="/portfolio" className="inline-flex min-h-11 items-center font-medium text-accent hover:underline">

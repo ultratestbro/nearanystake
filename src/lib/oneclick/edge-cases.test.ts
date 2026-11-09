@@ -1,4 +1,4 @@
-// Regressions for the 2026-11-08 app audit: deadlines, the quote echo, statuses and resumes.
+// Regression tests for the edge cases of a 1Click flow: deadlines, the quote echo, statuses and resumes.
 import { describe, expect, it } from "vitest";
 import dryNear from "../__fixtures__/oneclick/quote-dry-base-usdc-near.json";
 import dryOut from "../__fixtures__/oneclick/quote-dry-near-to-base-usdc.json";
@@ -12,7 +12,7 @@ const asRes = (r: unknown) => structuredClone(r) as QuoteResponse;
 const live = asRes(pending.response.quoteResponse);
 const liveReq = live.quoteRequest as unknown as QuoteRequest;
 
-describe("deadlines (M1, M5)", () => {
+describe("deadlines", () => {
   it("the countdown ends when the refund begins (request deadline), not when the address goes inactive (+72 h)", () => {
     const refundAt = Date.parse(String(live.quoteRequest.deadline));
     expect(quoteDeadline(live)).toBe(refundAt);
@@ -42,7 +42,7 @@ describe("deadlines (M1, M5)", () => {
   });
 });
 
-describe("quote echo gaps (L1)", () => {
+describe("quote echo gaps", () => {
   const dry = () => asRes(dryNear.response);
   const req = dryNear.request as unknown as QuoteRequest;
 
@@ -91,7 +91,7 @@ describe("quote echo gaps (L1)", () => {
   });
 });
 
-describe("statuses on resume (H1, M3, L4)", () => {
+describe("statuses on resume", () => {
   const s = (f: { response: unknown }) => f.response as StatusResponse;
   const ctx = { source: "USDC on Base", destination: "astro-stakers.poolv1.near", account: "alice.near", instant: false, stake: "none" as const };
 

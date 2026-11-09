@@ -1,6 +1,6 @@
 "use client";
 
-// Presentational pieces of the Stake card (direction A, "swap card"): one card that reads
+// Presentational pieces of the Stake card, laid out like a swap form: one card that reads
 // You pay → You stake into → You get → Details → one primary action (side by side from lg: the
 // inputs and Details left, You get and the action right), and turns into the tracker once money moves.
 // No state here: StakeFlow owns it and passes data in.

@@ -2,6 +2,7 @@
 // what did a delivery transaction pay. View calls only.
 
 import { NearRpc, createClient, isImplicitAccountId, isValidAccountId, type NearProvider } from "@anywalletkit/wallet-near";
+import { shortAccount } from "../format";
 import { transferredTo } from "../stakeAmount";
 import { nearProviders } from "./config";
 
@@ -32,13 +33,17 @@ export async function checkRecipient(accountId: string, rpc: NearRpc = nearClien
   return { ok: true, exists: !!view, implicit };
 }
 
-/** Instant stNEAR needs an existing account that is already registered on meta-pool.near (critique #10). */
+/**
+ * Instant stNEAR needs an existing account that is already registered on meta-pool.near: 1Click
+ * delivers the token with a plain transfer, and a NEP-141 token can't credit an account that has no
+ * storage registered with it.
+ */
 export async function instantStNearEligible(accountId: string, rpc: NearRpc = nearClient().rpc): Promise<{ ok: boolean; reason: string }> {
   const view = await rpc.viewAccount(accountId).catch(() => undefined);
-  if (!view) return { ok: false, reason: "Your NEAR account doesn't exist on chain yet, so it couldn't use stNEAR. Use the main flow: its delivery creates the account." };
+  if (!view) return { ok: false, reason: `${shortAccount(accountId)} doesn't exist on chain yet, so it couldn't use stNEAR. Use the main flow: its delivery creates the account.` };
   const reg = await rpc.callFunction<unknown>("meta-pool.near", "storage_balance_of", { account_id: accountId }).catch(() => undefined);
-  if (reg === undefined) return { ok: false, reason: "Couldn't read your stNEAR registration right now." };
-  if (reg === null) return { ok: false, reason: "Your account isn't registered on Meta Pool, so a delivery might not arrive. Use the main flow instead." };
+  if (reg === undefined) return { ok: false, reason: `Couldn't read the stNEAR registration of ${shortAccount(accountId)} right now.` };
+  if (reg === null) return { ok: false, reason: `${shortAccount(accountId)} isn't registered on Meta Pool, so a delivery might not arrive. Use the main flow instead.` };
   return { ok: true, reason: "" };
 }
 

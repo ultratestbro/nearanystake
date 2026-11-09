@@ -26,7 +26,7 @@ describe("local history", () => {
   });
 });
 
-describe("history cap (L14)", () => {
+describe("history cap", () => {
   it("over the cap, dry quotes go first: live signed quotes are kept for disputes", async () => {
     const { trimHistory } = await import("./history");
     const rec = (i: number, dry: boolean): FlowRecord => ({
