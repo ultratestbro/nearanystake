@@ -8,7 +8,7 @@ import { useState, type ReactNode } from "react";
 import { dateTime, duration, formatNear, formatUnits, percent } from "@/lib/format";
 import { compactNear, initials, poolName, usdText } from "@/lib/portfolio";
 import {
-  LIQUID_OPTIONS, UNSTAKED_DUST,
+  LIQUID_OPTIONS, UNSTAKED_DUST, pausedFeaturesText,
   type LiquidAccountDetails, type LiquidPoolInfo, type LiquidPreset, type LiquidStaking, type LiquidWithdrawalRequest, type NativeStaking, type NearEpoch, type NearPoolPosition, type UnlockEstimate,
 } from "@/lib/staking";
 import { useNow } from "@/lib/useAsync";
@@ -282,6 +282,10 @@ export function LiquidPositionCard({ preset, ls, data, apr, readOnly, account, e
     <InfoHint label="Paused" trigger={<StatusBadge tone="danger">Paused</StatusBadge>}>
       The contract is paused: it can&apos;t stake or unstake until its owner resumes it. The token itself can still be swapped.
     </InfoHint>
+  ) : info.pausedFeatures.length > 0 ? (
+    <InfoHint label="Partly paused" trigger={<StatusBadge tone="attention">Partly paused</StatusBadge>}>
+      {`The contract's owner paused ${pausedFeaturesText(info)}: those calls are refused until it resumes them. The token itself can still be swapped.`}
+    </InfoHint>
   ) : !info.codeHashKnown ? (
     <InfoHint label="Unknown code" trigger={<StatusBadge tone="danger">Unknown code</StatusBadge>}>
       The contract runs code this app has no pin for (an upgrade), so it won&apos;t stake into it.
@@ -293,7 +297,9 @@ export function LiquidPositionCard({ preset, ls, data, apr, readOnly, account, e
   );
 
   const u = req?.unlock ? unlockLine(req.unlock, now) : null;
-  const hint = req?.awaitingLiquidity ? (
+  const hint = req?.paused && d.canWithdraw ? (
+    <p className="text-warn">Unlocked, but the contract has withdrawals paused: it can be withdrawn once its owner resumes them.</p>
+  ) : req?.awaitingLiquidity ? (
     <p className="text-warn">Unlocked, waiting for the protocol&apos;s payout (the contract refills after its epoch bot runs).</p>
   ) : stage === 2 ? (
     <p>Unlocked. Withdraw it to your account.</p>

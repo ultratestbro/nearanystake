@@ -14,10 +14,10 @@
   },
   "dependencies": {
     "@anywalletkit/core": "0.8.0",
-    "@anywalletkit/protocol-staking-liquid-near": "0.1.0",
-    "@anywalletkit/protocol-staking-native-near": "0.1.0",
+    "@anywalletkit/protocol-staking-liquid-near": "0.1.1",
+    "@anywalletkit/protocol-staking-native-near": "0.2.0",
     "@anywalletkit/swap2-assets": "0.2.2",
-    "@anywalletkit/wallet-near": "0.4.0",
+    "@anywalletkit/wallet-near": "0.4.1",
     "@anywalletkit/wallet-solana": "0.6.0",
     "@near-wallet-selector/core": "10.1.4",
     "@near-wallet-selector/here-wallet": "10.1.4",

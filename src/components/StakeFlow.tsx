@@ -19,7 +19,7 @@ import { ago, clock, dateTime, duration, formatNear, formatUnits, money, parseUn
 import { stakeAmountAfterDelivery, type StakeAmount } from "@/lib/stakeAmount";
 import { FRESH_ACCOUNT_STORAGE, keptFromDelivery, nearForUsd, sharesFor, stakedFromDelivery, yearlyReward } from "@/lib/stakeEstimate";
 import {
-  LIQUID_OPTIONS, MIN_STAKE, NUM_EPOCHS_TO_UNLOCK, liquidStaking, nativeStaking, refusalText, stakeOverhead, stakingErrorText,
+  LIQUID_OPTIONS, MIN_STAKE, NUM_EPOCHS_TO_UNLOCK, liquidStakePaused, liquidStaking, nativeStaking, pausedFeaturesText, refusalText, stakeOverhead, stakingErrorText, warningText,
   type LiquidPoolInfo, type LiquidPreset, type LiquidStakeQuote, type NearEpoch, type NearPoolInfo, type NearStakeQuote,
 } from "@/lib/staking";
 import { DRY_REFUND } from "@/lib/dryrun";
@@ -155,13 +155,13 @@ function targetView(t: Target, d: TargetData, recipient: string | null): TargetV
     const o = LIQUID_OPTIONS.find((x) => x.id === t.preset)!;
     const s = d.liquid[t.preset];
     const l = s.data;
-    const ok = !!l && !l.info.paused && l.info.codeHashKnown;
+    const ok = !!l && !liquidStakePaused(l.info) && l.info.codeHashKnown;
     const badge = !l
       ? null
       : ok
         ? trustBadge("Verified", "success", `Checked live: ${o.contract} runs known code (pinned by account and code hash) and is not paused. One signature after delivery mints the token; nothing is ever sent to it by transfer.`)
-        : l.info.paused
-          ? trustBadge("Paused", "danger", `${o.contract} is paused right now, so a delivery couldn't be staked.`)
+        : liquidStakePaused(l.info)
+          ? trustBadge("Paused", "danger", `${o.contract} has ${l.info.paused ? "everything" : pausedFeaturesText(l.info)} paused right now, so a delivery couldn't be staked.`)
           : trustBadge("Unknown code", "danger", `${o.contract} runs code this app doesn't know yet (an upgrade), so it won't stake into it.`);
     return {
       name: o.label,
@@ -380,7 +380,7 @@ export function StakeFlow() {
       if (target.kind === "liquid") {
         // the same for the token contract: a paused one or an upgrade the module has no pin for can't mint
         const info = await liquidStaking(demo, target.preset).getPoolInfo();
-        if (info.paused) throw new Error(`${info.name} is paused right now, so the delivery couldn't be staked. Pick a validator pool instead.`);
+        if (liquidStakePaused(info)) throw new Error(`${info.name} is paused right now, so the delivery couldn't be staked. Pick a validator pool instead.`);
         if (!info.codeHashKnown) throw new Error(`${info.contract} runs code this app doesn't know yet (an upgrade), so it won't stake into it. Pick a validator pool instead.`);
       }
       const req = buildInboundQuoteRequest({ target: target.kind === "stnear" ? "stnear" : "near", originAsset: asset.assetId, amount, recipient, refundTo: refund, dry: dryRun, deadlineMs: deadlineMsFor(asset.chain) });
@@ -1772,7 +1772,7 @@ function StakeStep({
       )}
       {preflight?.warnings.map((w) => (
         <p key={w.code} className="text-sm text-warn">
-          {w.message}
+          {warningText(w)}
         </p>
       ))}
       {unconfirmed !== null && (

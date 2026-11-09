@@ -8,13 +8,14 @@ import { findAsset } from "@/lib/assets";
 import { formatUnits } from "@/lib/format";
 import { DRY_REFUND, depositAddressToShow } from "@/lib/dryrun";
 import { DEMO_ACCOUNT, SUGGESTED_POOL } from "@/lib/near/config";
-import { checkRecipient, nearClient } from "@/lib/near/reads";
+import { checkRecipient, nearClient, nearSpendable } from "@/lib/near/reads";
 import { watchAccount } from "@/lib/near/selector-account";
 import { requestQuote, DryRunGuardError } from "@/lib/oneclick/client";
 import { buildInboundQuoteRequest, verifyQuoteEcho, NEAR_ASSET } from "@/lib/oneclick/quote";
 import type { QuoteResponse } from "@/lib/oneclick/types";
 import { stakeAmountAfterDelivery } from "@/lib/stakeAmount";
-import { LIQUID_OPTIONS, MIN_STAKE, liquidStaking, nativeStaking, stakingErrorText } from "@/lib/staking";
+import { FRESH_ACCOUNT_STORAGE } from "@/lib/stakeEstimate";
+import { LIQUID_OPTIONS, MIN_STAKE, liquidStakePaused, liquidStaking, nativeStaking, stakeOverhead, stakingErrorText } from "@/lib/staking";
 
 const units = (v: bigint, decimals: number) => formatUnits(v, decimals, decimals).replace(/,/g, "");
 const near = (y: bigint) => `${units(y, 24)} NEAR`;
@@ -75,9 +76,10 @@ describe("mainnet, read-only", () => {
     for (const o of LIQUID_OPTIONS) {
       const l = liquidStaking(demo, o.id);
       const info = await l.getPoolInfo();
-      liquid[o.symbol] = { contract: info.contract, codeHash: info.codeHash, codeHashKnown: info.codeHashKnown, paused: info.paused, price: `${units(info.price, 24)} NEAR per token`, feeBps: info.feeBps, liquidity: near(info.liquidity), apr: await l.getApr() };
+      liquid[o.symbol] = { contract: info.contract, codeHash: info.codeHash, codeHashKnown: info.codeHashKnown, paused: info.paused, pausedFeatures: info.pausedFeatures, price: `${units(info.price, 24)} NEAR per token`, feeBps: info.feeBps, liquidity: near(info.liquidity), apr: await l.getApr() };
       expect(info.codeHashKnown).toBe(true);
-      expect(info.paused).toBe(false);
+      // the stake card and the quote check refuse a contract with deposits or staking paused on their own too
+      expect(liquidStakePaused(info)).toBe(false);
     }
     log("apr", { [SUGGESTED_POOL]: apr, ...liquid });
     expect(apr).toBeGreaterThan(2);
@@ -158,11 +160,38 @@ describe("mainnet, read-only", () => {
     await expect(native.stake({ amount: amount.amount, pool: SUGGESTED_POOL, expected: q.transactions })).rejects.toThrow(/read-only|ReadOnly|stake/);
   });
 
+  it("dry-run replay: the simulated stake on the demo account gets its 'What you'll sign' preview", async () => {
+    const res = quotes["base-usdc"];
+    expect(res).toBeTruthy();
+    const delivered = BigInt(res!.quote.amountOut);
+    const rpc = nearClient().rpc;
+    // StakeStep's simulated computeAmount: a brand-new account's storage and the module's overhead come off the delivery
+    const overhead = await stakeOverhead(native, rpc);
+    const amount = stakeAmountAfterDelivery({ reported: delivered, onChain: null, maxStakeable: delivered - FRESH_ACCOUNT_STORAGE - overhead, minStake: MIN_STAKE });
+    // then runPreflight: the module quotes that amount on the demo account itself
+    const q = await native.quoteStake({ amount: amount.amount, pool: SUGGESTED_POOL });
+    const lq = await liquidStaking(demo, "rnear").quoteStake({ amount: amount.amount });
+    log("simulated stake preview", {
+      delivered: near(delivered),
+      willStake: near(amount.amount),
+      kept: near(delivered - amount.amount),
+      demoSpendable: near(await nearSpendable(DEMO_ACCOUNT, rpc)),
+      native: { reserve: near(q.reserve), upfront: near(q.upfront), overhead: near(overhead), transactions: q.transactions },
+      rnear: { reserve: near(lq.reserve), storageFee: near(lq.storageFee), shares: `${units(lq.shares, 24)} rNEAR`, warnings: lq.warnings },
+    });
+    expect(amount.tooSmall).toBe(false);
+    expect(q.transactions[0]!.receiverId).toBe(SUGGESTED_POOL);
+    // the app's overhead is the module's own: the stake's upfront gas plus the reserve for the largest exit
+    expect(overhead).toBe(q.upfront + q.reserve);
+    expect(await stakeOverhead(liquidStaking(demo, "rnear"), rpc)).toBe(lq.upfront + lq.reserve);
+    expect(q.reserve).toBeGreaterThan(10n ** 23n); // ≥ 0.1 NEAR: [withdraw_all, unstake] bought upfront at min_gas_purchase_price
+  });
+
   it("exits on the demo account: unstake and claim plans (or the module's refusal, in words)", async () => {
     const out: Record<string, unknown> = {};
     try {
       const u = await native.quoteRequestWithdrawal({ amount: "all", pool: SUGGESTED_POOL });
-      out.unstake = { transactions: u.transactions, resetsTimer: u.resetsTimer, withdrawsFirst: near(u.withdrawsFirst), unlockEarliest: new Date(u.unlock.earliestAt).toISOString(), warnings: u.warnings };
+      out.unstake = { transactions: u.transactions, resetsTimer: u.resetsTimer, withdrawsFirst: near(u.withdrawsFirst), unlockEarliest: u.unlock && new Date(u.unlock.earliestAt).toISOString(), warnings: u.warnings };
     } catch (e) {
       out.unstake = { refused: stakingErrorText(e) };
     }

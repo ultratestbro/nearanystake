@@ -13,8 +13,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 Next 16 App Router, React 19, Tailwind 4, pnpm. `pnpm typecheck && pnpm lint && pnpm test && pnpm build`; dev on port 3501.
 
 - Staking goes only through `src/lib/staking.ts`, which hands out the Any Wallet Kit module instances
-  (`@anywalletkit/protocol-staking-native-near` / `-liquid-near` 0.1.0 from npm). Every read, quote and write is the
-  module's; there is no fallback backend.
+  (`@anywalletkit/protocol-staking-native-near` 0.2.0 / `-liquid-near` 0.1.1 from npm). Every read, quote and write is
+  the module's; there is no fallback backend. The reserve a stake leaves (`exitReserve` / `stakeOverhead`) follows the
+  module's rule and is pinned to its `quote.reserve` in `staking.test.ts` and the e2e.
 - `pnpm e2e` runs the read-only mainnet checks in `e2e/` (view calls and dry 1Click quotes; never signs).
 - 1Click requests are built in `src/lib/oneclick/quote.ts` and sent from the browser by `client.ts`, which checks
   the echo. Never set `customRecipientMsg`, never deliver into a liquid staking token, never add a recipient field:

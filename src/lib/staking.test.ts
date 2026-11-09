@@ -1,32 +1,34 @@
-// The app's staking path on the real Any Wallet Kit modules (vendor tarballs), offline: a small fake
-// NEAR node answers the view calls and a fake wallet-selector wallet records what it was asked to
-// sign. Proves that the wallet receives exactly the module's transactions, that the app stakes only
-// what was delivered, and that the fail-closed checks reach the UI.
+// The app's staking path on the real Any Wallet Kit modules (from npm), offline: a small fake NEAR
+// node answers the view calls and a fake wallet-selector wallet records what it was asked to sign.
+// Proves that the wallet receives exactly the module's transactions, that the app stakes only what
+// was delivered, and that the fail-closed checks reach the UI.
 
 import { ReadOnlyAccountError } from "@anywalletkit/core";
 import { LIQUID_PRESETS, LiquidStakingProtocolNear } from "@anywalletkit/protocol-staking-liquid-near";
-import { KNOWN_POOL_CODE_HASHES, MIN_STAKE, NearStakingError, type NearPoolInfo } from "@anywalletkit/protocol-staking-native-near";
+import { KNOWN_POOL_CODE_HASHES, MIN_STAKE, NearStakingError, poolRequestId, type NearPoolInfo } from "@anywalletkit/protocol-staking-native-near";
 import { NearRpc, type NearFetch } from "@anywalletkit/wallet-near";
 import { describe, expect, it, vi } from "vitest";
 import { selectorAccount, watchAccount, type SelectorWalletLike } from "./near/selector-account";
 import { stakeAmountAfterDelivery } from "./stakeAmount";
-import { nativeStaking, poolStatus, stakingErrorText } from "./staking";
+import { claimFirst, exitReserve, liquidStakePaused, nativeStaking, pausedFeaturesText, poolStatus, stakeOverhead, stakingErrorText, warningText } from "./staking";
 
 const NEAR = 10n ** 24n;
 const TGAS = 10n ** 12n;
 const ME = "alice.near";
 const ASTRO = "astro-stakers.poolv1.near";
 const LINEAR = LIQUID_PRESETS.linear.contracts.mainnet!.contract;
+const RNEAR = LIQUID_PRESETS.rnear.contracts.mainnet!.contract;
 const EPOCH_START = 223_300_000;
 
 interface Delegation { staked: bigint; unstaked: bigint; canWithdraw: boolean }
 
-function fakeNode(opts: { balance?: bigint; delegation?: Delegation } = {}) {
+function fakeNode(opts: { balance?: bigint; delegation?: Delegation; validatorsDown?: boolean; rnearPaused?: string[] } = {}) {
   const requests: Array<{ method: string; params: unknown }> = [];
   const accounts: Record<string, { amount: string; locked: string; storage_usage: number; code_hash: string }> = {
     [ME]: { amount: String(opts.balance ?? 5n * NEAR), locked: "0", storage_usage: 182, code_hash: "11111111111111111111111111111111" },
     [ASTRO]: { amount: String(10n * NEAR), locked: String(4_000_000n * NEAR), storage_usage: 300_000, code_hash: KNOWN_POOL_CODE_HASHES.mainnet[0]! },
     [LINEAR]: { amount: String(1_000_000n * NEAR), locked: "0", storage_usage: 900_000, code_hash: LIQUID_PRESETS.linear.contracts.mainnet!.codeHashes[0]! },
+    [RNEAR]: { amount: String(1_000_000n * NEAR), locked: "0", storage_usage: 900_000, code_hash: LIQUID_PRESETS.rnear.contracts.mainnet!.codeHashes[0]! },
   };
   const d = opts.delegation ?? { staked: 0n, unstaked: 0n, canWithdraw: true };
   const views: Record<string, (args: Record<string, unknown>) => unknown> = {
@@ -38,6 +40,15 @@ function fakeNode(opts: { balance?: bigint; delegation?: Delegation } = {}) {
     [`${LINEAR}.ft_price`]: () => String((NEAR * 14n) / 10n),
     [`${LINEAR}.is_paused`]: () => false,
     [`${LINEAR}.get_beneficiaries`]: () => ({ "linear.sputnik-dao.near": 600 }),
+    // rNEAR: near-plugins per-feature pauses, and a first stake that keeps storage_balance_bounds.min (alice is not registered)
+    [`${RNEAR}.ft_metadata`]: () => ({ symbol: "rNEAR", decimals: 24 }),
+    [`${RNEAR}.get_summary`]: () => ({ ft_price: String((NEAR * 12n) / 10n), total_staked_near_amount: String(1_200_000n * NEAR), total_share_amount: String(1_000_000n * NEAR), validators_num: 50 }),
+    [`${RNEAR}.ft_price`]: () => String((NEAR * 12n) / 10n),
+    [`${RNEAR}.is_paused`]: () => false,
+    [`${RNEAR}.pa_all_paused`]: () => opts.rnearPaused ?? null,
+    [`${RNEAR}.get_beneficiaries`]: () => ({ "rhea.sputnik-dao.near": 500 }),
+    [`${RNEAR}.storage_balance_of`]: () => null,
+    [`${RNEAR}.storage_balance_bounds`]: () => ({ min: String(125n * 10n ** 19n), max: String(125n * 10n ** 19n) }),
   };
   const header = (height: number) => ({ header: { height, hash: `H${height}`, epoch_id: "E", timestamp_nanosec: String(1_762_000_000_000_000_000n + BigInt(height - EPOCH_START) * 575_000_000n) } });
   const fetch: NearFetch = async (method, params) => {
@@ -48,6 +59,7 @@ function fakeNode(opts: { balance?: bigint; delegation?: Delegation } = {}) {
     if (method === "EXPERIMENTAL_protocol_config") return { protocol_version: 88, runtime_config: { min_gas_purchase_price: "1000000000" } };
     if (method === "block") return header(typeof p.block_id === "number" ? p.block_id : EPOCH_START + 20_000);
     if (method === "validators") {
+      if (opts.validatorsDown) throw new Error("fake node: validators timed out");
       return {
         epoch_height: 4950,
         epoch_start_height: EPOCH_START,
@@ -212,5 +224,97 @@ describe("staking on the real modules through the wallet-selector adapter", () =
     expect(poolStatus(p(["unknown-code"])).label).toBe("Not allowed");
     expect(poolStatus(p(["fee-above-max"])).label).toBe("Fee too high");
     expect(poolStatus(p(["not-in-next-set"])).label).toBe("Leaving set");
+  });
+});
+
+function liquidSetup(pool: "linear" | "rnear", opts: Parameters<typeof fakeNode>[0] = {}) {
+  const node = fakeNode(opts);
+  const { w, functionCall } = wallet();
+  const account = selectorAccount(w, ME, { rpc: new NearRpc(node.fetch), network: "mainnet", functionCall });
+  return { node, w, liquid: new LiquidStakingProtocolNear(account, { pool, provider: node.fetch, apr: () => 4.6 }) };
+}
+
+describe("what changed in native 0.2.0 / liquid 0.1.1, as the app handles it", () => {
+  it("the app's stake overhead is the module's own: the stake's upfront gas plus the reserve for [withdraw_all, unstake]", async () => {
+    const { native, node } = setup();
+    const rpc = new NearRpc(node.fetch);
+    const q = await native.quoteStake({ amount: NEAR, pool: ASTRO });
+    expect(await exitReserve(native, rpc)).toBe(q.reserve);
+    expect(await stakeOverhead(native, rpc)).toBe(q.upfront + q.reserve);
+    // two 50 Tgas calls (plus their conversion gas) bought at 10^9: just over 0.1 NEAR, about twice the stake's own upfront
+    expect(q.reserve).toBeGreaterThan(10n ** 23n);
+    expect(q.reserve).toBeGreaterThan(q.upfront * 2n - 10n ** 22n);
+    // liquid modules keep one unstake's worth
+    for (const pool of ["linear", "rnear"] as const) {
+      const { liquid } = liquidSetup(pool);
+      const lq = await liquid.quoteStake({ amount: NEAR });
+      expect(await stakeOverhead(liquid, rpc)).toBe(lq.upfront + lq.reserve);
+    }
+  });
+
+  it("an unstake still goes out when the validator set can't be read: unlock null, positions without pool info", async () => {
+    const { native, w } = setup({ delegation: { staked: 3n * NEAR, unstaked: 2n * NEAR, canWithdraw: false }, validatorsDown: true });
+    const q = await native.quoteRequestWithdrawal({ amount: NEAR, pool: ASTRO, allowTimerReset: true });
+    expect(q.unlock).toBeNull();
+    expect(q.transactions[0]!.receiverId).toBe(ASTRO);
+    const [p] = await native.listPositions({ pools: [ASTRO] });
+    expect(p).toMatchObject({ pool: ASTRO, staked: 3n * NEAR, unstaked: 2n * NEAR, poolInfo: null, unlock: null });
+    await native.requestWithdrawal({ amount: NEAR, pool: ASTRO, allowTimerReset: true, expected: q.transactions });
+    expect(w.signAndSendTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it("claim-first: an unstake the account can't pay together with its withdraw names the request to withdraw first", async () => {
+    // 0.08 NEAR pays one withdraw_all's upfront gas (~0.05) but not [withdraw_all, unstake] (~0.1)
+    const { native, w } = setup({ balance: 8n * 10n ** 22n, delegation: { staked: 3n * NEAR, unstaked: 2n * NEAR, canWithdraw: true } });
+    const err = await native.quoteRequestWithdrawal({ amount: NEAR, pool: ASTRO }).catch((e: unknown) => e);
+    expect((err as NearStakingError).code).toBe("claim-first");
+    const c = claimFirst(err);
+    expect(c).toEqual({ id: poolRequestId(ASTRO), pool: ASTRO, withdrawable: 2n * NEAR });
+    expect(stakingErrorText(err)).toMatch(/^2 NEAR is already unlocked in astro-stakers\.poolv1\.near and has to be withdrawn first: .* Withdraw it, then unstake\.$/);
+    expect(claimFirst(new NearStakingError("timer-reset-refused", "x"))).toBeNull();
+    // what the dialog's "Withdraw … first" quotes and signs: that request alone (discover is off here, so the pool is passed)
+    const claim = await native.quoteClaimWithdrawals({ ids: [c!.id], pools: [ASTRO] });
+    expect(claim.transactions).toEqual([{ receiverId: ASTRO, actions: [{ functionCall: { methodName: "withdraw_all", args: {}, gas: 50n * TGAS, deposit: 0n } }] }]);
+    await native.claimWithdrawals({ ids: [c!.id], pools: [ASTRO], expected: claim.transactions });
+    expect(w.signAndSendTransaction).toHaveBeenCalledTimes(1);
+    expect(w.signAndSendTransaction.mock.calls[0]![0].actions).toEqual(claim.transactions[0]!.actions);
+  });
+
+  it("dust: unstaking a stake below 0.001 NEAR warns in the app's words; a partial unstake that would leave dust staked is refused", async () => {
+    const { native } = setup({ delegation: { staked: 5n * 10n ** 20n, unstaked: 0n, canWithdraw: true } });
+    const q = await native.quoteRequestWithdrawal({ amount: "all", pool: ASTRO });
+    const dust = q.warnings.find((x) => x.code === "leaves-dust");
+    expect(dust).toBeTruthy();
+    expect(warningText(dust!)).toMatch(/below 0\.001 NEAR: too little to withdraw/);
+    expect(warningText(dust!)).not.toMatch(/module/);
+    expect(warningText({ code: "withdraws-unlocked-first", message: "as is" })).toBe("as is");
+    const { native: n2 } = setup({ delegation: { staked: NEAR, unstaked: 0n, canWithdraw: true } });
+    const err = await n2.quoteRequestWithdrawal({ amount: NEAR - 1n, pool: ASTRO }).catch((e: unknown) => e);
+    expect((err as NearStakingError).code).toBe("below-minimum");
+  });
+
+  it("rNEAR: a first stake keeps 0.00125 NEAR for registration and says so; LiNEAR stakes the whole amount", async () => {
+    const { liquid } = liquidSetup("rnear");
+    const q = await liquid.quoteStake({ amount: NEAR });
+    expect(q.storageFee).toBe(125n * 10n ** 19n);
+    expect(q.warnings.map((x) => x.code)).toEqual(["pays-storage"]);
+    expect(warningText(q.warnings[0]!)).toMatch(/keeps 0\.00125 NEAR/);
+    const { liquid: linear } = liquidSetup("linear");
+    const l = await linear.quoteStake({ amount: NEAR });
+    expect(l.storageFee).toBe(0n);
+    expect(l.warnings).toEqual([]);
+  });
+
+  it("rNEAR per-feature pauses: paused staking is Paused on the stake card and refused; paused unstaking alone still takes stake", async () => {
+    const stake = liquidSetup("rnear", { rnearPaused: ["internal_stake"] });
+    const info = await stake.liquid.getPoolInfo();
+    expect(info).toMatchObject({ paused: false, pausedFeatures: ["internal_stake"] });
+    expect(liquidStakePaused(info)).toBe(true);
+    expect(pausedFeaturesText(info)).toBe("staking");
+    await expect(stake.liquid.quoteStake({ amount: NEAR })).rejects.toMatchObject({ code: "contract-paused" });
+    const unstake = await liquidSetup("rnear", { rnearPaused: ["internal_unstake", "internal_withdraw"] }).liquid.getPoolInfo();
+    expect(liquidStakePaused(unstake)).toBe(false);
+    expect(pausedFeaturesText(unstake)).toBe("unstaking and withdrawals");
+    expect(liquidStakePaused(await liquidSetup("rnear").liquid.getPoolInfo())).toBe(false);
   });
 });

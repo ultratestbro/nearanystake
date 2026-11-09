@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { addRecord, newId } from "@/lib/history";
 import { dateTime, formatNear, formatUnits, parseUnits } from "@/lib/format";
 import { poolName } from "@/lib/portfolio";
-import { stakingErrorText, type LiquidClaimQuote, type LiquidStaking, type LiquidUnstakeQuote, type NativeStaking, type NearClaimQuote, type NearPoolPosition, type NearUnstakeQuote } from "@/lib/staking";
+import { claimFirst, stakingErrorText, warningText, type LiquidClaimQuote, type LiquidStaking, type LiquidUnstakeQuote, type NativeStaking, type NearClaimQuote, type NearPoolPosition, type NearUnstakeQuote } from "@/lib/staking";
 import { Modal } from "./Modal";
 import { TxLink } from "./TxLink";
 import { TxPreview } from "./TxPreview";
@@ -25,6 +25,10 @@ export function UnstakeModal({ pool, staked, position, native, readOnly, account
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [hash, setHash] = useState("");
+  // 'claim-first': the unlocked balance has to be withdrawn on its own before this unstake fits the account's gas
+  const [claim, setClaim] = useState<{ id: bigint; withdrawable: bigint } | null>(null);
+  const [claiming, setClaiming] = useState(false);
+  const [claimed, setClaimed] = useState(false);
   const amount = all ? ("all" as const) : parseUnits(text, 24);
   // a preview is for the amount it was made for: any edit drops it (the write would refuse it anyway)
   const edit = <T,>(set: (v: T) => void) => (v: T) => {
@@ -35,11 +39,14 @@ export function UnstakeModal({ pool, staked, position, native, readOnly, account
   const preflight = async () => {
     setErr("");
     setQ(null);
+    setClaim(null);
+    setClaimed(false);
     if (amount === null) return setErr("Enter an amount.");
     setBusy(true);
     try {
       setQ(await native.quoteRequestWithdrawal({ amount, pool, allowTimerReset }));
     } catch (e) {
+      setClaim(claimFirst(e));
       setErr(stakingErrorText(e));
     } finally {
       setBusy(false);
@@ -55,6 +62,7 @@ export function UnstakeModal({ pool, staked, position, native, readOnly, account
       addRecord({ id: newId(), type: "action", kind: "unstake", createdAt: Date.now(), account, target: pool, amount: q.amount.toString(), txs: r.hashes.map((h) => ({ chain: "near:mainnet", hash: h, label: "Unstake" })) });
       onDone();
     } catch (e) {
+      setClaim(claimFirst(e));
       setErr(stakingErrorText(e));
     } finally {
       setBusy(false);
@@ -96,7 +104,7 @@ export function UnstakeModal({ pool, staked, position, native, readOnly, account
             </label>
           </Banner>
         )}
-        {position.unstaked > 0n && position.canWithdraw && (
+        {position.unstaked > 0n && position.canWithdraw && !claim && (
           <Banner tone="accent" title="Your unlocked NEAR is withdrawn first">
             {formatNear(position.unstaked)} is ready: it is withdrawn in the same transaction, so it doesn&apos;t lock again.
           </Banner>
@@ -108,12 +116,21 @@ export function UnstakeModal({ pool, staked, position, native, readOnly, account
               <Row label="Unstaking">{formatNear(q.amount)}</Row>
               {q.withdrawsFirst > 0n && <Row label="Withdrawn first">{formatNear(q.withdrawsFirst)}</Row>}
               <Row label="Unlocks">
-                epoch {q.unlock.earliestEpoch.toString()}
-                {q.unlock.latestEpoch !== null ? `–${q.unlock.latestEpoch.toString()}` : "+"}
-                <span className="block text-xs text-muted">
-                  {dateTime(q.unlock.earliestAt)}
-                  {q.unlock.latestAt ? ` – ${dateTime(q.unlock.latestAt)}` : ""}
-                </span>
+                {q.unlock ? (
+                  <>
+                    epoch {q.unlock.earliestEpoch.toString()}
+                    {q.unlock.latestEpoch !== null ? `–${q.unlock.latestEpoch.toString()}` : "+"}
+                    <span className="block text-xs text-muted">
+                      {dateTime(q.unlock.earliestAt)}
+                      {q.unlock.latestAt ? ` – ${dateTime(q.unlock.latestAt)}` : ""}
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    Unlock time unknown
+                    <span className="block text-xs text-muted">The epoch couldn&apos;t be read right now. Unstaked NEAR unlocks 4 epochs later (about 21–28 h).</span>
+                  </>
+                )}
               </Row>
               <Row label="Network fee" hint={`${formatNear(q.upfront, 4)} held back for gas while it runs, refunded`}>
                 at most {formatNear(q.fee, 5)}
@@ -121,12 +138,41 @@ export function UnstakeModal({ pool, staked, position, native, readOnly, account
             </Rows>
             {q.warnings.map((w) => (
               <p key={w.code} className="text-sm text-warn">
-                {w.message}
+                {warningText(w)}
               </p>
             ))}
           </>
         )}
-        {err && <p className="text-sm text-danger">{err}</p>}
+        {claim ? (
+          <Banner tone="warn" title="Withdraw the unlocked NEAR first">
+            {err}
+            <button type="button" onClick={() => setClaiming(true)} className="btn-tactile-accent mt-3 min-h-11 w-full justify-center px-4 text-sm">
+              Withdraw {formatNear(claim.withdrawable, 3)} first
+            </button>
+          </Banner>
+        ) : (
+          err && <p className="text-sm text-danger">{err}</p>
+        )}
+        {claim && claiming && (
+          <ClaimModal
+            native={native}
+            id={claim.id}
+            readOnly={readOnly}
+            account={account}
+            onClose={() => {
+              setClaiming(false);
+              // withdrawn: the unstake now needs one call's gas, and Preview builds it again
+              if (claimed) {
+                setClaim(null);
+                setErr("");
+              }
+            }}
+            onDone={() => {
+              setClaimed(true);
+              onDone();
+            }}
+          />
+        )}
         {hash ? (
           <Banner tone="accent" title="Unstake sent">
             <TxLink chain="near:mainnet" hash={hash} /> It shows as Unstaking on the card, with its unlock time.
@@ -146,8 +192,11 @@ export function UnstakeModal({ pool, staked, position, native, readOnly, account
   );
 }
 
-/** Withdraws every unlocked native balance (one `withdraw_all` per pool, one prompt); quoted as it opens. */
-export function ClaimModal({ native, readOnly, account, onClose, onDone }: { native: NativeStaking; readOnly: boolean; account: string; onClose: () => void; onDone: () => void }) {
+/**
+ * Withdraws every unlocked native balance (one `withdraw_all` per pool, one prompt), or only request
+ * `id` (one pool's, when an unstake needs it withdrawn first); quoted as it opens.
+ */
+export function ClaimModal({ native, id, readOnly, account, onClose, onDone }: { native: NativeStaking; id?: bigint; readOnly: boolean; account: string; onClose: () => void; onDone: () => void }) {
   const [q, setQ] = useState<NearClaimQuote | null>(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(true);
@@ -155,20 +204,20 @@ export function ClaimModal({ native, readOnly, account, onClose, onDone }: { nat
 
   useEffect(() => {
     let live = true;
-    native.quoteClaimWithdrawals().then(
+    native.quoteClaimWithdrawals(id !== undefined ? { ids: [id] } : undefined).then(
       (r) => live && setQ(r),
       (e: unknown) => live && setErr(stakingErrorText(e)),
     ).finally(() => live && setBusy(false));
     return () => {
       live = false;
     };
-  }, [native]);
+  }, [native, id]);
 
   const sign = async () => {
     if (!q) return;
     setBusy(true);
     try {
-      const r = await native.claimWithdrawals({ expected: q.transactions });
+      const r = await native.claimWithdrawals({ ...(id !== undefined ? { ids: [id] } : {}), expected: q.transactions });
       setHashes(r.hashes);
       addRecord({ id: newId(), type: "action", kind: "claim", createdAt: Date.now(), account, target: q.claims.map((c) => c.pool).join(", "), amount: q.amount.toString(), txs: r.hashes.map((h) => ({ chain: "near:mainnet", hash: h, label: "Withdraw" })) });
       onDone();
@@ -268,7 +317,7 @@ export function LiquidModal({ kind, ls, symbol, shares, readOnly, account, onClo
             {"warnings" in q &&
               q.warnings.map((w) => (
                 <p key={w.code} className="text-sm text-warn">
-                  {w.message}
+                  {warningText(w)}
                 </p>
               ))}
           </>

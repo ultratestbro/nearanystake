@@ -8,11 +8,12 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useCallback, useState, type ReactNode } from "react";
+import { SOURCE_ASSETS } from "@/lib/assets";
 import { duration, formatNear, formatUnits, percent, shortAccount } from "@/lib/format";
 import { nearSpendable } from "@/lib/near/reads";
 import { listTokens } from "@/lib/oneclick/client";
 import { heroAmount, smallNear, summarize, usdText, type Holding } from "@/lib/portfolio";
-import { DEFAULT_RESERVE, LIQUID_OPTIONS, UNSTAKED_DUST, refusalText, type LiquidPreset, type NearEpoch, type UnlockEstimate } from "@/lib/staking";
+import { LIQUID_OPTIONS, UNSTAKED_DUST, refusalText, type LiquidPreset, type NearEpoch, type UnlockEstimate } from "@/lib/staking";
 import { useAsync, useNow } from "@/lib/useAsync";
 import { useApp } from "./AppProvider";
 import { EpochClock, unbondingWindow, useEpoch } from "./EpochClock";
@@ -186,9 +187,11 @@ function Dashboard({ mode, account, s, activity }: { mode: Mode; account: string
               quiet={sum.unstaking === 0n}
               hint={
                 sum.unstaking > 0n
-                  ? soonest !== null && soonest > now
-                    ? `First unlock in ${duration(soonest - now)}`
-                    : "Unlocks at the next epoch boundary"
+                  ? soonest === null
+                    ? "Unlock time unknown right now"
+                    : soonest > now
+                      ? `First unlock in ${duration(soonest - now)}`
+                      : "Unlocks at the next epoch boundary"
                   : `Takes about ${epoch ? `${Math.max(1, Math.round((unbondingWindow(epoch).at - now) / 3_600_000))} h` : "21–28 h"} once you start`
               }
             />
@@ -223,7 +226,9 @@ function Dashboard({ mode, account, s, activity }: { mode: Mode; account: string
               {loaded && count === 0 && !balance.error && (
                 <div className="rounded-[20px] border border-dashed border-line px-6 py-8 text-center">
                   <p className="font-medium">Nothing staked on {shortAccount(account)} yet</p>
-                  <p className="mt-1 text-sm text-muted">Pay with USDC, SOL, ETH or 40+ other tokens; one signature stakes the NEAR that arrives.</p>
+                  <p className="mt-1 text-sm text-muted">
+                    Pay with any of {SOURCE_ASSETS.length} tokens on {new Set(SOURCE_ASSETS.map((a) => a.chain)).size} chains (USDC, SOL, ETH, …); one signature stakes the NEAR that arrives.
+                  </p>
                 </div>
               )}
               {loaded &&
@@ -369,7 +374,7 @@ function Available({ readOnly, spendable, error, price, onCashOutState }: { read
       <p className="mt-4 text-sm text-muted">
         {spendable === undefined || spendable <= RESERVE_LIKE
           ? "Kept back when you staked: a gas reserve so you can unstake later, plus gas refunded after the stake. Yours to use any time."
-          : `Not staked, so it isn't earning. Yours to use any time; a cash-out keeps ${formatNear(DEFAULT_RESERVE, 2)} for the gas of a later unstake.`}
+          : "Not staked, so it isn't earning. Yours to use any time; a cash-out keeps enough for the gas of a later unstake."}
       </p>
       <button
         type="button"

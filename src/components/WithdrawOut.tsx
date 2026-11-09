@@ -10,7 +10,7 @@ import { isFinal, phaseOf } from "@/lib/oneclick/status";
 import type { QuoteResponse, StatusResponse } from "@/lib/oneclick/types";
 import { connectPayer, PAYER_LABEL } from "@/lib/pay";
 import { clock, formatNear, formatUnits, parseUnits, plainUnits, shortAccount } from "@/lib/format";
-import { DEFAULT_RESERVE, upfrontGas } from "@/lib/staking";
+import { exitReserve, nativeStaking, upfrontGas, type NativeStaking } from "@/lib/staking";
 import { useAsync, useNow } from "@/lib/useAsync";
 import { useApp } from "./AppProvider";
 import { PayWithSheet } from "./PayWithSheet";
@@ -42,13 +42,14 @@ const PROBE_ADDRESS = "0".repeat(64);
 
 /**
  * What can leave: spendable − the wNEAR transaction's upfront gas (120 Tgas bought at
- * min_gas_purchase_price, refunded after) − two registrations − the reserve kept for later gas.
+ * min_gas_purchase_price, refunded after) − two registrations − the reserve a stake also keeps, so
+ * the account can still pay a later unstake (the staking module's largest exit).
  */
-async function sendable(account: string): Promise<bigint> {
+async function sendable(account: string, staking: NativeStaking): Promise<{ max: bigint; reserve: bigint }> {
   const rpc = nearClient().rpc;
-  const [free, upfront] = await Promise.all([nearSpendable(account, rpc), upfrontGas(rpc, [outboundDepositTx(account, PROBE_ADDRESS, 1n)])]);
-  const max = free - upfront - 2n * STORAGE - DEFAULT_RESERVE - 1n;
-  return max > 0n ? max : 0n;
+  const [free, upfront, reserve] = await Promise.all([nearSpendable(account, rpc), upfrontGas(rpc, [outboundDepositTx(account, PROBE_ADDRESS, 1n)]), exitReserve(staking, rpc)]);
+  const max = free - upfront - 2n * STORAGE - reserve - 1n;
+  return { max: max > 0n ? max : 0n, reserve };
 }
 
 /**
@@ -59,8 +60,9 @@ async function sendable(account: string): Promise<bigint> {
 export function WithdrawOut({ onInFlight }: { onInFlight?: (inFlight: boolean) => void } = {}) {
   const { near, dryRun } = useApp();
   const account = near!.accountId;
-  const bal = useAsync(() => sendable(account), [account], 30_000);
-  const spendable = bal.data ?? 0n;
+  const signer = near!.account;
+  const bal = useAsync(() => sendable(account, nativeStaking(signer)), [account, signer], 30_000);
+  const spendable = bal.data?.max ?? 0n;
   const [dest, setDest] = useState<SourceAsset | null>(() => findAsset("eip155:8453", "USDC") ?? null);
   const [sheet, setSheet] = useState(false);
   const [text, setText] = useState("");
@@ -123,7 +125,10 @@ export function WithdrawOut({ onInFlight }: { onInFlight?: (inFlight: boolean) =
     setStatus(null);
     if (!dest) return;
     if (amount === null || amount <= 0n) return setErr("Enter an amount of NEAR.");
-    if (amount > spendable) return setErr(`At most ${formatNear(spendable)} can leave: NEAR holds back about 0.12 NEAR of prepaid gas while the transaction runs (refunded), plus the wNEAR registrations and 0.02 NEAR for later gas.`);
+    if (amount > spendable)
+      return setErr(
+        `At most ${formatNear(spendable)} can leave: NEAR holds back about 0.12 NEAR of prepaid gas while the transaction runs (refunded), plus the wNEAR registrations and ${bal.data ? formatNear(bal.data.reserve, 3) : "a reserve"} kept for the gas of a later unstake.`,
+      );
     if (!looksLikeAddress(dest.chain, recipient)) return setErr(`Enter your own ${dest.chainLabel} address.`);
     if (!own) return setErr("Confirm the address is your own wallet.");
     setBusy(true);

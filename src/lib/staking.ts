@@ -1,19 +1,20 @@
 // The one place the app touches the Any Wallet Kit staking modules
-// (@anywalletkit/protocol-staking-native-near and -liquid-near 0.1.0 from npm). Components get the
-// module instances themselves: every read, quote and write is the module's, with its fresh,
+// (@anywalletkit/protocol-staking-native-near 0.2.0 and -liquid-near 0.1.1 from npm). Components get
+// the module instances themselves: every read, quote and write is the module's, with its fresh,
 // fail-closed checks.
 
 import type { IWalletAccount, IWalletAccountReadOnly } from "@anywalletkit/core";
 import {
-  DEFAULT_RESERVE, GasPricer, MIN_STAKE, NativeStakingProtocolNear, NearStakingError, NUM_EPOCHS_TO_UNLOCK, UNSTAKED_DUST, costOf,
+  GasPricer, MIN_STAKE, NativeStakingProtocolNear, NearStakingError, NUM_EPOCHS_TO_UNLOCK, UNSTAKED_DUST, costOf,
   type NativeStakingNearConfig, type NearPoolInfo, type PoolRefusal,
 } from "@anywalletkit/protocol-staking-native-near";
 import type { NearRpc, NearTransaction } from "@anywalletkit/wallet-near";
-import { LiquidStakingError, LiquidStakingProtocolNear, LIQUID_PRESETS, type LiquidPresetName } from "@anywalletkit/protocol-staking-liquid-near";
+import { LiquidStakingError, LiquidStakingProtocolNear, LIQUID_PRESETS, PAUSE_KEYS, type LiquidPoolInfo, type LiquidPresetName } from "@anywalletkit/protocol-staking-liquid-near";
 import { createNearHistory } from "@anywalletkit/wallet-near/history";
+import { formatNear } from "./format";
 import { ARCHIVAL_RPC, nearProviders } from "./near/config";
 
-export { DEFAULT_RESERVE, MIN_STAKE, NUM_EPOCHS_TO_UNLOCK, UNSTAKED_DUST, NearStakingError, LiquidStakingError };
+export { MIN_STAKE, NUM_EPOCHS_TO_UNLOCK, UNSTAKED_DUST, NearStakingError, LiquidStakingError };
 
 let pricer: { rpc: NearRpc; p: GasPricer } | null = null;
 /**
@@ -26,19 +27,46 @@ export async function upfrontGas(rpc: NearRpc, txs: NearTransaction[]): Promise<
   return costOf(txs, await pricer.p.prices()).upfront;
 }
 
+const fc = (methodName: string, args: Record<string, unknown>, gas: bigint) => ({ functionCall: { methodName, args, gas, deposit: 0n } });
+const MAX_AMOUNT = "9".repeat(39);
+
+/**
+ * What a stake leaves on the account so it can always be left, by the module's own rule: the module's
+ * `reserve`, but at least the upfront gas of its largest exit. Native: an unstake that withdraws an
+ * unlocked balance first, `[withdraw_all, unstake]` in one transaction (~0.11 NEAR on mainnet, Nov
+ * 2026); liquid: one unstake. staking.test.ts pins it to the modules' `quote.reserve`.
+ */
+export async function exitReserve(module: NativeStakingProtocolNear | LiquidStakingProtocolNear, rpc: NearRpc): Promise<bigint> {
+  const { unstake, withdraw } = module.gas;
+  const actions =
+    module instanceof NativeStakingProtocolNear
+      ? [fc("withdraw_all", {}, withdraw), fc("unstake", { amount: MAX_AMOUNT }, unstake)]
+      : [fc("unstake", { amount: MAX_AMOUNT }, unstake > withdraw ? unstake : withdraw)];
+  const exit = await upfrontGas(rpc, [{ receiverId: "pool", actions }]);
+  return exit > module.reserve ? exit : module.reserve;
+}
+
 /**
  * What a stake keeps back on a fresh account by the module's own rules: the stake's upfront gas plus
- * the reserve (at least one unstake's upfront gas). For the dry-run simulation, where the delivery
- * never reached an account the module could quote.
+ * the exit reserve. For the dry-run simulation, where the delivery never reached an account the module
+ * could quote.
  */
-export async function stakeOverhead(module: { gas: { stake: bigint; unstake: bigint; withdraw: bigint } }, rpc: NearRpc): Promise<bigint> {
-  const fc = (methodName: string, args: Record<string, unknown>, gas: bigint) => ({ functionCall: { methodName, args, gas, deposit: 0n } });
-  const exitGas = module.gas.unstake > module.gas.withdraw ? module.gas.unstake : module.gas.withdraw;
-  const [stake, exit] = await Promise.all([
-    upfrontGas(rpc, [{ receiverId: "pool", actions: [fc("deposit_and_stake", {}, module.gas.stake)] }]),
-    upfrontGas(rpc, [{ receiverId: "pool", actions: [fc("unstake", { amount: "9".repeat(39) }, exitGas)] }]),
-  ]);
-  return stake + (exit > DEFAULT_RESERVE ? exit : DEFAULT_RESERVE);
+export async function stakeOverhead(module: NativeStakingProtocolNear | LiquidStakingProtocolNear, rpc: NearRpc): Promise<bigint> {
+  const [stake, reserve] = await Promise.all([upfrontGas(rpc, [{ receiverId: "pool", actions: [fc("deposit_and_stake", {}, module.gas.stake)] }]), exitReserve(module, rpc)]);
+  return stake + reserve;
+}
+
+// rNEAR can pause deposits, staking, unstaking or withdrawals on their own (`pausedFeatures`)
+const FEATURE_WORDS: Record<string, string> = { internal_deposit: "deposits", internal_stake: "staking", internal_unstake: "unstaking", internal_withdraw: "withdrawals" };
+
+/** The liquid contract can't take a stake now: paused as a whole, or a feature `deposit_and_stake` needs is. */
+export function liquidStakePaused(info: LiquidPoolInfo): boolean {
+  return info.paused || info.pausedFeatures.some((k) => PAUSE_KEYS.deposit_and_stake!.includes(k));
+}
+
+/** "staking and withdrawals": the features a liquid contract paused on their own, in words. */
+export function pausedFeaturesText(info: LiquidPoolInfo): string {
+  return [...new Set(info.pausedFeatures.map((k) => FEATURE_WORDS[k] ?? k))].join(" and ");
 }
 export type {
   NearEpoch, NearPoolInfo, NearPoolPosition, NearStakeQuote, NearUnstakeQuote, NearClaimQuote, NearWithdrawalRequest, PoolRefusal, UnlockEstimate,
@@ -119,6 +147,11 @@ export function poolStatus(p: NearPoolInfo): { label: string; tone: "accent" | "
 export function stakingErrorText(e: unknown): string {
   if (e instanceof NearStakingError) {
     if (e.code === "pool-not-allowed" && e.refusals?.length) return `This pool can't take new stake: ${e.refusals.map(refusalText).join(", ")}.`;
+    const c = claimFirst(e);
+    if (c) {
+      const gas = typeof e.details?.required === "bigint" && typeof e.details?.available === "bigint" ? ` (${formatNear(e.details.required, 4)} needed, ${formatNear(e.details.available, 4)} on the account)` : "";
+      return `${formatNear(c.withdrawable)} is already unlocked in ${c.pool} and has to be withdrawn first: the account can't cover the gas NEAR holds back for withdrawing and unstaking in one transaction${gas}. Withdraw it, then unstake.`;
+    }
     return e.message;
   }
   if (e instanceof LiquidStakingError) return e.message;
@@ -129,4 +162,21 @@ export function stakingErrorText(e: unknown): string {
   const m = e instanceof Error ? e.message : String(e);
   if (/insufficient|NotEnoughBalance/i.test(m)) return short;
   return m;
+}
+
+/**
+ * The native module's 'claim-first' refusal: an unlocked balance has to be withdrawn before this
+ * unstake (the account can't pay both calls in one transaction, but can pay the withdrawal alone).
+ * `id` is the request to claim; null for any other error.
+ */
+export function claimFirst(e: unknown): { id: bigint; pool: string; withdrawable: bigint } | null {
+  if (!(e instanceof NearStakingError) || e.code !== "claim-first") return null;
+  const { id, pool, withdrawable } = e.details ?? {};
+  return typeof id === "bigint" && typeof pool === "string" && typeof withdrawable === "bigint" ? { id, pool, withdrawable } : null;
+}
+
+/** A quote warning in the app's words: the module's sentence, except where it speaks of the module itself. */
+export function warningText(w: { code: string; message: string }): string {
+  if (w.code === "leaves-dust") return "What this leaves unstaked in the pool is below 0.001 NEAR: too little to withdraw (the gas costs more), so it won't show as ready to withdraw.";
+  return w.message;
 }

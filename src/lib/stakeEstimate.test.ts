@@ -4,7 +4,8 @@ import { stakeAmountAfterDelivery } from "./stakeAmount";
 
 const NEAR = 10n ** 24n;
 const MIN = 10n ** 21n;
-const OVERHEAD = 5n * 10n ** 22n; // ≈ 0.05 NEAR: reserve + the stake's prepaid gas
+// ≈ 0.16 NEAR on mainnet (Nov 2026): the stake's prepaid gas (~0.055) + the reserve for [withdraw_all, unstake] (~0.11)
+const OVERHEAD = 16n * 10n ** 22n;
 
 describe("the Stake card's preview of a delivery", () => {
   it("an empty existing account keeps the overhead; a fresh one its storage too", () => {
@@ -14,7 +15,7 @@ describe("the Stake card's preview of a delivery", () => {
 
   it("an account that already holds the reserve keeps nothing of the delivery", () => {
     expect(keptFromDelivery({ overhead: OVERHEAD, spendable: 2n * NEAR, fresh: false })).toBe(0n);
-    expect(keptFromDelivery({ overhead: OVERHEAD, spendable: 3n * 10n ** 22n, fresh: false })).toBe(2n * 10n ** 22n);
+    expect(keptFromDelivery({ overhead: OVERHEAD, spendable: 3n * 10n ** 22n, fresh: false })).toBe(13n * 10n ** 22n);
   });
 
   it("matches what stakeAmountAfterDelivery stakes for the same account", () => {
