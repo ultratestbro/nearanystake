@@ -6,7 +6,7 @@
 import type { IWalletAccount, IWalletAccountReadOnly } from "@anywalletkit/core";
 import {
   GasPricer, MIN_STAKE, NativeStakingProtocolNear, NearStakingError, NUM_EPOCHS_TO_UNLOCK, UNSTAKED_DUST, costOf,
-  type NativeStakingNearConfig, type NearPoolInfo, type PoolRefusal,
+  type GasPrices, type NativeStakingNearConfig, type NearPoolInfo, type PoolRefusal,
 } from "@anywalletkit/protocol-staking-native-near";
 import type { NearRpc, NearTransaction } from "@anywalletkit/wallet-near";
 import { LiquidStakingError, LiquidStakingProtocolNear, LIQUID_PRESETS, PAUSE_KEYS, type LiquidPoolInfo, type LiquidPresetName } from "@anywalletkit/protocol-staking-liquid-near";
@@ -17,18 +17,33 @@ import { ARCHIVAL_RPC, nearProviders } from "./near/config";
 export { MIN_STAKE, NUM_EPOCHS_TO_UNLOCK, UNSTAKED_DUST, NearStakingError, LiquidStakingError };
 
 let pricer: { rpc: NearRpc; p: GasPricer } | null = null;
+const pricesOf = (rpc: NearRpc): Promise<GasPrices> => {
+  if (pricer?.rpc !== rpc) pricer = { rpc, p: new GasPricer(() => rpc) };
+  return pricer.p.prices();
+};
+
 /**
  * The NEAR the node holds back when it accepts `txs` (prepaid gas bought at min_gas_purchase_price,
  * 10× the gas price on mainnet), by the modules' own fee model. For the app's own transactions (the
  * wNEAR deposit of "Cash out to any chain").
  */
 export async function upfrontGas(rpc: NearRpc, txs: NearTransaction[]): Promise<bigint> {
-  if (pricer?.rpc !== rpc) pricer = { rpc, p: new GasPricer(() => rpc) };
-  return costOf(txs, await pricer.p.prices()).upfront;
+  return costOf(txs, await pricesOf(rpc)).upfront;
 }
 
+type StakingModule = NativeStakingProtocolNear | LiquidStakingProtocolNear;
 const fc = (methodName: string, args: Record<string, unknown>, gas: bigint) => ({ functionCall: { methodName, args, gas, deposit: 0n } });
 const MAX_AMOUNT = "9".repeat(39);
+
+function reserveAt(module: StakingModule, prices: GasPrices): bigint {
+  const { unstake, withdraw } = module.gas;
+  const actions =
+    module instanceof NativeStakingProtocolNear
+      ? [fc("withdraw_all", {}, withdraw), fc("unstake", { amount: MAX_AMOUNT }, unstake)]
+      : [fc("unstake", { amount: MAX_AMOUNT }, unstake > withdraw ? unstake : withdraw)];
+  const exit = costOf([{ receiverId: "pool", actions }], prices).upfront;
+  return exit > module.reserve ? exit : module.reserve;
+}
 
 /**
  * What a stake leaves on the account so it can always be left, by the module's own rule: the module's
@@ -36,24 +51,18 @@ const MAX_AMOUNT = "9".repeat(39);
  * unlocked balance first, `[withdraw_all, unstake]` in one transaction (~0.11 NEAR on mainnet, Nov
  * 2026); liquid: one unstake. staking.test.ts pins it to the modules' `quote.reserve`.
  */
-export async function exitReserve(module: NativeStakingProtocolNear | LiquidStakingProtocolNear, rpc: NearRpc): Promise<bigint> {
-  const { unstake, withdraw } = module.gas;
-  const actions =
-    module instanceof NativeStakingProtocolNear
-      ? [fc("withdraw_all", {}, withdraw), fc("unstake", { amount: MAX_AMOUNT }, unstake)]
-      : [fc("unstake", { amount: MAX_AMOUNT }, unstake > withdraw ? unstake : withdraw)];
-  const exit = await upfrontGas(rpc, [{ receiverId: "pool", actions }]);
-  return exit > module.reserve ? exit : module.reserve;
+export async function exitReserve(module: StakingModule, rpc: NearRpc): Promise<bigint> {
+  return reserveAt(module, await pricesOf(rpc));
 }
 
 /**
  * What a stake keeps back on a fresh account by the module's own rules: the stake's upfront gas plus
- * the exit reserve. For the dry-run simulation, where the delivery never reached an account the module
- * could quote.
+ * the exit reserve, at one gas-price read. For the dry-run simulation, where the delivery never
+ * reached an account the module could quote.
  */
-export async function stakeOverhead(module: NativeStakingProtocolNear | LiquidStakingProtocolNear, rpc: NearRpc): Promise<bigint> {
-  const [stake, reserve] = await Promise.all([upfrontGas(rpc, [{ receiverId: "pool", actions: [fc("deposit_and_stake", {}, module.gas.stake)] }]), exitReserve(module, rpc)]);
-  return stake + reserve;
+export async function stakeOverhead(module: StakingModule, rpc: NearRpc): Promise<bigint> {
+  const prices = await pricesOf(rpc);
+  return costOf([{ receiverId: "pool", actions: [fc("deposit_and_stake", {}, module.gas.stake)] }], prices).upfront + reserveAt(module, prices);
 }
 
 // rNEAR can pause deposits, staking, unstaking or withdrawals on their own (`pausedFeatures`)

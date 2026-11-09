@@ -8,7 +8,7 @@ import { findAsset } from "@/lib/assets";
 import { formatUnits } from "@/lib/format";
 import { DRY_REFUND, depositAddressToShow } from "@/lib/dryrun";
 import { DEMO_ACCOUNT, SUGGESTED_POOL } from "@/lib/near/config";
-import { checkRecipient, nearClient, nearSpendable } from "@/lib/near/reads";
+import { checkRecipient, nearClient } from "@/lib/near/reads";
 import { watchAccount } from "@/lib/near/selector-account";
 import { requestQuote, DryRunGuardError } from "@/lib/oneclick/client";
 import { buildInboundQuoteRequest, verifyQuoteEcho, NEAR_ASSET } from "@/lib/oneclick/quote";
@@ -30,6 +30,7 @@ const log = (k: string, v: unknown) => {
 const demo = watchAccount(DEMO_ACCOUNT, "mainnet");
 const native = nativeStaking(demo);
 const quotes: Record<string, QuoteResponse> = {};
+const overhead: { native?: bigint } = {};
 
 describe("mainnet, read-only", () => {
   it("epoch clock: ~6.9 h epochs measured from the chain", async () => {
@@ -145,17 +146,24 @@ describe("mainnet, read-only", () => {
     const amount = stakeAmountAfterDelivery({ reported: delivered, onChain: null, maxStakeable: max, minStake: MIN_STAKE });
     const q = await native.quoteStake({ amount: amount.amount, pool: SUGGESTED_POOL });
     const liquidQ = await liquidStaking(demo, "rnear").quoteStake({ amount: amount.amount });
+    // the app's previews use its own copy of the reserve rule: it must equal the modules' (the stake's upfront gas plus the exit reserve)
+    const rpc = nearClient().rpc;
+    overhead.native = await stakeOverhead(native, rpc);
+    const liquidOverhead = await stakeOverhead(liquidStaking(demo, "rnear"), rpc);
     log("stake transaction (built, not sent)", {
       delivered: near(delivered),
       maxStakeable: near(max),
       willStake: near(amount.amount),
       basis: amount.basis,
       capped: amount.capped,
-      native: { pool: q.pool.id, eligible: q.pool.eligible, feeBound: near(q.fee), apr: q.apr, transactions: q.transactions, warnings: q.warnings },
-      rnear: { shares: `${units(liquidQ.shares, 24)} rNEAR`, feeBound: near(liquidQ.fee), transactions: liquidQ.transactions },
+      native: { pool: q.pool.id, eligible: q.pool.eligible, feeBound: near(q.fee), reserve: near(q.reserve), upfront: near(q.upfront), apr: q.apr, transactions: q.transactions, warnings: q.warnings },
+      rnear: { shares: `${units(liquidQ.shares, 24)} rNEAR`, storageFee: near(liquidQ.storageFee), reserve: near(liquidQ.reserve), feeBound: near(liquidQ.fee), transactions: liquidQ.transactions, warnings: liquidQ.warnings },
     });
     expect(q.transactions).toEqual([{ receiverId: SUGGESTED_POOL, actions: [{ functionCall: { methodName: "deposit_and_stake", args: {}, gas: 50n * 10n ** 12n, deposit: amount.amount } }] }]);
     expect(amount.amount).toBe(delivered < max ? delivered : max);
+    expect(overhead.native).toBe(q.upfront + q.reserve);
+    expect(liquidOverhead).toBe(liquidQ.upfront + liquidQ.reserve);
+    expect(q.reserve).toBeGreaterThan(10n ** 23n); // ≥ 0.1 NEAR: [withdraw_all, unstake] bought upfront at min_gas_purchase_price
     // the demo is read-only: the same plan refuses to be signed
     await expect(native.stake({ amount: amount.amount, pool: SUGGESTED_POOL, expected: q.transactions })).rejects.toThrow(/read-only|ReadOnly|stake/);
   });
@@ -163,28 +171,15 @@ describe("mainnet, read-only", () => {
   it("dry-run replay: the simulated stake on the demo account gets its 'What you'll sign' preview", async () => {
     const res = quotes["base-usdc"];
     expect(res).toBeTruthy();
+    expect(overhead.native).toBeTruthy();
     const delivered = BigInt(res!.quote.amountOut);
-    const rpc = nearClient().rpc;
-    // StakeStep's simulated computeAmount: a brand-new account's storage and the module's overhead come off the delivery
-    const overhead = await stakeOverhead(native, rpc);
-    const amount = stakeAmountAfterDelivery({ reported: delivered, onChain: null, maxStakeable: delivered - FRESH_ACCOUNT_STORAGE - overhead, minStake: MIN_STAKE });
-    // then runPreflight: the module quotes that amount on the demo account itself
+    // StakeStep's simulated computeAmount: a brand-new account's storage and the module's overhead come off the delivery,
+    // then runPreflight quotes that amount on the demo account itself (a refusal there replaces the preview)
+    const amount = stakeAmountAfterDelivery({ reported: delivered, onChain: null, maxStakeable: delivered - FRESH_ACCOUNT_STORAGE - overhead.native!, minStake: MIN_STAKE });
     const q = await native.quoteStake({ amount: amount.amount, pool: SUGGESTED_POOL });
-    const lq = await liquidStaking(demo, "rnear").quoteStake({ amount: amount.amount });
-    log("simulated stake preview", {
-      delivered: near(delivered),
-      willStake: near(amount.amount),
-      kept: near(delivered - amount.amount),
-      demoSpendable: near(await nearSpendable(DEMO_ACCOUNT, rpc)),
-      native: { reserve: near(q.reserve), upfront: near(q.upfront), overhead: near(overhead), transactions: q.transactions },
-      rnear: { reserve: near(lq.reserve), storageFee: near(lq.storageFee), shares: `${units(lq.shares, 24)} rNEAR`, warnings: lq.warnings },
-    });
+    log("simulated stake preview", { delivered: near(delivered), willStake: near(amount.amount), kept: near(delivered - amount.amount), transactions: q.transactions });
     expect(amount.tooSmall).toBe(false);
-    expect(q.transactions[0]!.receiverId).toBe(SUGGESTED_POOL);
-    // the app's overhead is the module's own: the stake's upfront gas plus the reserve for the largest exit
-    expect(overhead).toBe(q.upfront + q.reserve);
-    expect(await stakeOverhead(liquidStaking(demo, "rnear"), rpc)).toBe(lq.upfront + lq.reserve);
-    expect(q.reserve).toBeGreaterThan(10n ** 23n); // ≥ 0.1 NEAR: [withdraw_all, unstake] bought upfront at min_gas_purchase_price
+    expect(q.transactions).toEqual([{ receiverId: SUGGESTED_POOL, actions: [{ functionCall: { methodName: "deposit_and_stake", args: {}, gas: 50n * 10n ** 12n, deposit: amount.amount } }] }]);
   });
 
   it("exits on the demo account: unstake and claim plans (or the module's refusal, in words)", async () => {
