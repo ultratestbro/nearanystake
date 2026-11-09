@@ -22,7 +22,7 @@ import {
   LIQUID_OPTIONS, MIN_STAKE, NUM_EPOCHS_TO_UNLOCK, liquidStakePaused, liquidStaking, nativeStaking, pausedFeaturesText, refusalText, stakeOverhead, stakingErrorText, warningText,
   type LiquidPoolInfo, type LiquidPreset, type LiquidStakeQuote, type NearEpoch, type NearPoolInfo, type NearStakeQuote,
 } from "@/lib/staking";
-import { DRY_REFUND } from "@/lib/dryrun";
+import { dryRefundFor } from "@/lib/dryrun";
 import { useAsync, useNow, type AsyncState } from "@/lib/useAsync";
 import { useApp } from "./AppProvider";
 import { DepositPanel } from "./DepositPanel";
@@ -351,7 +351,7 @@ export function StakeFlow() {
     setErr("");
     if (!asset || amount === null || amount <= 0n) return setErr("Enter an amount.");
     if (!recipient) return setErr("Connect your NEAR wallet: the NEAR is delivered to it.");
-    const refund = refundTo.trim() || (dryRun && asset.family ? DRY_REFUND[asset.family] ?? "" : "");
+    const refund = refundTo.trim() || (dryRun ? dryRefundFor(asset.chain) ?? "" : "");
     // the refund address and its confirmation live in Details: open it where the fix is
     const refundProblem = !refund
       ? `Enter your own ${asset.chainLabel} address for refunds.`
@@ -466,7 +466,7 @@ export function StakeFlow() {
 
   // refunds: auto-filled from the paying wallet, editable in Details
   const refund = refundTo.trim();
-  const dryStandIn = dryRun && asset?.family ? DRY_REFUND[asset.family] : undefined;
+  const dryStandIn = dryRun && asset ? dryRefundFor(asset.chain) : undefined;
   const confirmOwn = !dryRun && payer?.address !== refund;
   const showRefundInput = editRefund || (!payer && !dryStandIn);
   const chain = asset?.chainLabel ?? "the source chain";

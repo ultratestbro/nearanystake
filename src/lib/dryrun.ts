@@ -33,12 +33,28 @@ export function initialDryRun(nearAccount: string | null, remembered: boolean | 
 
 /**
  * Dry quotes still need a refund address 1Click accepts (it refuses 0x…dEaD and Solana's system
- * program): burn / precompile addresses, and a documentation address for Bitcoin. Used only when dry
- * and the field is left empty; a dry quote has no deposit address, so nothing can be refunded to them.
+ * program): burn / precompile / zero-hash addresses with valid checksums, a documentation address for
+ * Bitcoin and an exchange hot wallet for Zcash. Keyed by the CAIP-2 namespace. Used only when dry and
+ * the field is left empty; a dry quote has no deposit address, so nothing can be refunded to them.
+ * Each one got a dry quote from 1Click on 2026-11-09. Stellar has none: 1Click wants a memo deposit there.
  */
 export const DRY_REFUND: Record<string, string> = {
-  evm: "0x0000000000000000000000000000000000000001",
+  eip155: "0x0000000000000000000000000000000000000001",
   solana: "1nc1nerator11111111111111111111111111111111",
   tron: "T9yD14Nj9j7xAB4dbGeiX9h8unkKHxuWwb",
   bitcoin: "bc1qxy2kgdygjrsqtzq2n0yrf2493p83kkfjhx0wlh",
+  ton: "UQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAJKZ",
+  zcash: "t1KfwsnwJeNRVjQGBDZhwKskpQbih2qx5Ua",
+  litecoin: "ltc1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqp9ysmq",
+  doge: "D596YFweJQuHY1BbjazZYmAbt8jJPbKehC",
+  xrp: "rrrrrrrrrrrrrrrrrrrrrhoLvTp",
+  bch: "bitcoincash:qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqfnhks603",
+  cardano: "addr1vyqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqkdl5mw",
+  aptos: "0x0000000000000000000000000000000000000000000000000000000000000001",
+  sui: "0x0000000000000000000000000000000000000000000000000000000000000002",
 };
+
+/** The dry-run stand-in refund address for a source chain, if it has one. */
+export function dryRefundFor(chain: string): string | undefined {
+  return DRY_REFUND[chain.split(":")[0]];
+}

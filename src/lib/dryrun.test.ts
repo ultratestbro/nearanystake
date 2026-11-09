@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import dryNear from "./__fixtures__/oneclick/quote-dry-base-usdc-near.json";
 import pending from "./__fixtures__/oneclick/status-pending-expired.json";
-import { canGoLive, depositAddressToShow, initialDryRun } from "./dryrun";
+import { SOURCE_ASSETS, looksLikeAddress } from "./assets";
+import { canGoLive, depositAddressToShow, dryRefundFor, initialDryRun } from "./dryrun";
 import type { QuoteResponse } from "./oneclick/types";
 
 const dry = dryNear.response as unknown as QuoteResponse;
@@ -38,5 +39,14 @@ describe("dry-run guard", () => {
     expect(initialDryRun("alice.near", null)).toBe(false);
     expect(initialDryRun("alice.near", false)).toBe(false);
     expect(initialDryRun("alice.near", true)).toBe(true);
+  });
+});
+
+describe("dry-run refund stand-ins", () => {
+  it("every source chain but Stellar has one that passes the address check", () => {
+    const chains = [...new Set(SOURCE_ASSETS.map((a) => a.chain))];
+    const missing = chains.filter((c) => !dryRefundFor(c));
+    expect(missing).toEqual(["stellar:pubnet"]);
+    for (const c of chains.filter((c) => dryRefundFor(c))) expect(looksLikeAddress(c, dryRefundFor(c)!), c).toBe(true);
   });
 });
