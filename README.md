@@ -147,9 +147,12 @@ released an unrelated package, `@anywalletkit/protocol-swap2-usdt0` 0.4.3) were 
 15:00 UTC. The versions used here add the review fixes of `dd93115c` (2026-11-08 16:39 UTC): a stake reserve sized for
 `[withdraw_all, unstake]` with the `claim-first` refusal, exits that don't depend on validator or epoch reads
 (`unlock: null`), no unstake that leaves dust, the scheduled-fee check on every `*.pool.near` pool, rNEAR's first-stake
-storage fee and per-feature pauses, and spendable = amount − max(0, storage − locked). Release commit `a1dccb2f` (tags
-`@anywalletkit/protocol-staking-native-near@0.2.0`, `@anywalletkit/protocol-staking-liquid-near@0.1.1`,
-`@anywalletkit/wallet-near@0.4.1`); all three were published to npm with provenance on 2026-11-08 around 17:00 UTC.
+storage fee and per-feature pauses, and spendable = amount − max(0, storage − locked). Release commit `a1dccb2f`. The
+tags (`@anywalletkit/protocol-staking-native-near@0.2.0`, `@anywalletkit/protocol-staking-liquid-near@0.1.1`,
+`@anywalletkit/wallet-near@0.4.1`) and the npm provenance of all three point to `209dd702` (2026-11-08 16:48 UTC), the
+next commit on main, which CI published from; it only relaxes a test's time limit in an unrelated package
+(`packages/kit`), so the published code is that of `a1dccb2f`. All three were published to npm with provenance on
+2026-11-08 around 17:00 UTC.
 
 **Baseline.** Any Wallet Kit ([github.com/ultratestbro/anywalletkit](https://github.com/ultratestbro/anywalletkit),
 `@anywalletkit/*` on npm), an open wallet SDK by the same author (Apache-2.0), is used here as a library. The
