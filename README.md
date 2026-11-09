@@ -12,6 +12,7 @@ signature, and the NEAR lands in your own account.
 
 - **Live:** https://nearanystake.xyz (NEAR mainnet; dry-run mode until you connect a NEAR wallet)
 - **Code:** https://github.com/ultratestbro/nearanystake, Apache-2.0 (`LICENSE`)
+- **Demo post with video:** https://x.com/0xdanya_xo/status/2119921038179934335
 
 Built for the NEAR Hackathon 2026, tracks **DeFi** and **Open**. Non-custodial: no contract of ours, no server
 holding funds or keys. The app never sees a private key.
