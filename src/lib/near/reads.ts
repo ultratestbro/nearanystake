@@ -1,7 +1,7 @@
 // App-level NEAR reads that are not staking: does an account exist, is it registered on Meta Pool,
 // what did a delivery transaction pay. View calls only.
 
-import { NearRpc, createClient, isImplicitAccountId, isValidAccountId, type NearProvider } from "@anywalletkit/wallet-near";
+import { NearRpc, STORAGE_PRICE_PER_BYTE, createClient, isImplicitAccountId, isValidAccountId, type NearProvider } from "@anywalletkit/wallet-near";
 import { shortAccount } from "../format";
 import { transferredTo } from "../stakeAmount";
 import { nearProviders } from "./config";
@@ -57,11 +57,16 @@ export async function deliveredOnChain(txHash: string, recipient: string, raw = 
   }
 }
 
-/** What the account can spend: amount − locked − storage (10^19 yocto per byte), 0n for an account that doesn't exist yet. */
+/**
+ * What the account can spend: amount − max(0, storage − locked), 0n for an account that doesn't exist
+ * yet. `amount` never includes `locked`, and a locked (validator) balance pays for storage first: the
+ * staking modules' and wallet-near's own rule.
+ */
 export async function nearSpendable(accountId: string, rpc: NearRpc = nearClient().rpc): Promise<bigint> {
   const v = await rpc.viewAccount(accountId);
   if (!v) return 0n;
-  const free = BigInt(v.amount) - BigInt(v.locked) - BigInt(v.storage_usage) * 10n ** 19n;
+  const unpaid = BigInt(v.storage_usage) * STORAGE_PRICE_PER_BYTE - BigInt(v.locked);
+  const free = BigInt(v.amount) - (unpaid > 0n ? unpaid : 0n);
   return free > 0n ? free : 0n;
 }
 
