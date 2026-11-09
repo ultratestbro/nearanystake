@@ -141,11 +141,13 @@ export function fundsView(phase: Phase, c: FundsContext): FundsView {
       tone = "bad";
       break;
     case "failed":
-      headline = "1Click reports that the swap failed. Check your refund address on the source chain; if nothing arrives, contact 1Click support with the deposit address (the signed quote is in Recent activity).";
+      headline = c.dry
+        ? "1Click reports that the swap failed. In a live run: check your refund address on the source chain; if nothing arrives, contact 1Click support with the deposit address and the signed quote saved in Recent activity."
+        : "1Click reports that the swap failed. Check your refund address on the source chain; if nothing arrives, contact 1Click support with the deposit address (the signed quote is in Recent activity).";
       tone = "bad";
       break;
     case "expired":
-      headline = "The deadline passed before a full deposit arrived: anything sent is refunded (minus the refund fee). This page keeps checking in case 1Click saw a deposit late.";
+      headline = `The deadline passed before a full deposit arrived: anything sent is refunded (minus the refund fee). ${c.dry ? "In a live run this page keeps checking" : "This page keeps checking"} in case 1Click saw a deposit late.`;
       tone = "bad";
       break;
   }

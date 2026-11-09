@@ -1,6 +1,6 @@
-// An Any Wallet Kit account over a wallet-selector wallet (NEAR-STAKING-API §4.1). The staking
-// modules build the exact transactions; this hands them to the user's wallet unchanged, one prompt per
-// write (several transactions go out with one signAndSendTransactions prompt).
+// @anywalletkit/core's IWalletAccount for a wallet-selector wallet. The staking modules build the exact
+// transactions; this hands them to the user's wallet unchanged, one prompt per write (several
+// transactions go out with one signAndSendTransactions prompt).
 
 import {
   ReadOnlyAccountError, SignerError, UserRejectedError,

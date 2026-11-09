@@ -71,6 +71,10 @@ describe("where the funds are", () => {
     expect(v.legs.find((l) => l.id === "intents")!.state).toBe("failed");
     expect(v.headline).toMatch(/refund/i);
   });
+  it.each<Phase>(["failed", "expired"])("a simulated %s says what a live run would do: a dry run has no deposit address and is never polled", (p) => {
+    expect(fundsView(p, { ...ctx, dry: true }).headline).toMatch(/In a live run/);
+    expect(fundsView(p, ctx).headline).not.toMatch(/In a live run/);
+  });
 });
 
 describe("reading the delivery", () => {

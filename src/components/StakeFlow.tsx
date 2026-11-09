@@ -1496,8 +1496,8 @@ function QuoteAndTrack({
         )}
         {phase === "expired" && (
           <Notice tone="danger" title="Deadline passed">
-            No full deposit arrived in time. Anything sent goes back to {shortAccount(quote.req.refundTo)} on {asset.chainLabel}, minus the refund fee. This page keeps asking 1Click
-            once a minute in case it saw a deposit late.
+            No full deposit arrived in time. Anything sent goes back to {shortAccount(quote.req.refundTo)} on {asset.chainLabel}, minus the refund fee.{" "}
+            {isDry ? "In a live run this page keeps asking" : "This page keeps asking"} 1Click once a minute in case it saw a deposit late.
           </Notice>
         )}
       </div>
