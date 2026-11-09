@@ -7,7 +7,7 @@ const eslintConfig = defineConfig([
   ...nextTs,
   // chain and token icons come from third-party CDNs; next/image would need every host allowlisted
   { rules: { "@next/next/no-img-element": "off" } },
-  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts", "vendor/**"]),
+  globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts"]),
 ]);
 
 export default eslintConfig;

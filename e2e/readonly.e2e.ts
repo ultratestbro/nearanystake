@@ -33,7 +33,7 @@ const quotes: Record<string, QuoteResponse> = {};
 const overhead: { native?: bigint } = {};
 
 describe("mainnet, read-only", () => {
-  it("epoch clock: ~6.9 h epochs measured from the chain", async () => {
+  it("epoch clock: 6–8 h epochs (~6.8 h in Nov 2026) measured from the chain", async () => {
     const e = await native.getEpoch();
     log("epoch", { height: e.height, startBlock: e.startBlock, block: e.block, blocksLeft: e.blocksLeft, epochMs: e.epochMs, epoch: hours(e.epochMs), endsAt: new Date(e.endsAt).toISOString() });
     expect(e.length).toBe(43_200n);
