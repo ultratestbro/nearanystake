@@ -26,11 +26,11 @@ Dry-run mode: real 1Click quotes, real pools and APRs, no deposit address. Quote
 | # | Do | See |
 |---|---|---|
 | 1 | Open https://nearanystake.xyz/ | **Native staking APR** (the network's gross APR from the protocol's own reward data × 0.95, i.e. after a typical 5 % pool fee; the gross figure is in the hint), **Rhea rNEAR** and **LiNEAR** APR (7-day price growth), **Native unbonding 21–28 h**. Under **Validators**: the epoch clock (the epoch length measured on chain, ~6.8 h on 2026-11-09, not 12 h, and when a native unstake started now would unlock) and the live validator list: stake, fee, APR after the pool's fee, uptime, status (**Verified**, or why not, e.g. **Fee too high**), and **Stake** on each eligible pool. |
-| 2 | Click **Start staking** (`/stake`) | One card, prefilled (two columns on a wide screen, one on a phone). **You pay** `5` with the token chip **USDC · Base** (opens **Pay with**: 69 tokens on 25 chains) and quick amounts **$5** / **$20** / **$50** / **$100**. **You stake into**: **Validator** / **rNEAR** / **LiNEAR** with their APRs, the pool row (`astro-stakers`, **Verified**; click it to **Pick a validator** among the eligible ones) and **Instant stNEAR · costs more**. **You get**: ≈ NEAR staked, ≈ NEAR earned a year, when it unlocks after unstaking. **Details** (closed: *To a demo account (dry run)*): *NEAR goes to* `nima.near` (*the demo account, dry run*), *Kept on your account* (the gas reserve), *If anything fails* (*Nothing to refund in a dry run*), *Pool fee*. Main button **Connect NEAR wallet**, under it **Get a dry-run quote · nothing to pay**. |
+| 2 | Click **Start staking** (`/stake`) | One card, prefilled (two columns on a wide screen, one on a phone). **You pay** `5` with the token chip **USDC · Base** (opens **Pay with**: 69 tokens on 25 chains) and quick amounts **$5** / **$20** / **$50** / **$100**. **You stake into**: **Validator** / **rNEAR** / **LiNEAR** with their APRs, the pool row (`astro-stakers`, **Verified**; click it to **Pick a validator** among the eligible ones) and **Instant stNEAR · costs more**. **You get**: ≈ NEAR staked, ≈ NEAR earned a year, when it unlocks after unstaking. **Details** (closed: *To a demo account (dry run)*): *NEAR goes to* `nima.near` (*the demo account, dry run*), *Kept on your account* (the gas reserve: *≈ 0.1661 NEAR for gas, so you can unstake later* for $5 on 2026-11-09), *If anything fails* (*Nothing to refund in a dry run*), *Pool fee*. Main button **Connect NEAR wallet**, under it **Get a dry-run quote · nothing to pay**. |
 | 3 | Press **Get a dry-run quote · nothing to pay** | The same card becomes the dry-run quote with 1Click's exact numbers: **You get** ≈ NEAR staked (the delivery minus the gas reserve kept on the account). **Details** (its summary: fee and ETA): *Swap fee (NEAR Intents)*, *Arrives in*, *NEAR goes to* (≈ amount and the minimum), *Kept on your account*, *If anything fails* (refund address, a placeholder in a dry run, and what a refund costs), *Pool fee*, and **Quote check: Matches what you asked for** (the response's `quoteRequest` compared field by field with the request). No deposit address. Buttons: **Play the next steps (simulated)**, the chips under **Or try another outcome**, and **Start over with a new quote**. |
-| 4 | Press **Play the next steps (simulated)** | The card turns into a tracker, *Simulated stake of 5 USDC*, badge **Simulation**: the route USDC on Base → NEAR Intents → `nima.near` → the pool, and timed steps. The stake step, *In a live run: sign to stake … NEAR*, shows **Delivered** and **Will stake**: in a simulation the delivery minus a new account's storage and the gas reserve; in a live run exactly what was delivered, capped only by what the account can spend. **What you'll sign** shows the `deposit_and_stake` transaction the staking module built (pool, gas, deposit). The sign button reads **Connect NEAR wallet to stake for real**. The preview runs on the demo account's own balance: for an amount that account can't cover, a **Preflight on the demo account** notice replaces the transaction preview. |
+| 4 | Press **Play the next steps (simulated)** | The card turns into a tracker, *Simulated stake of 5 USDC*, badge **Simulation**: the route USDC on Base → NEAR Intents → `nima.near` → the pool, and timed steps. The stake step, *In a live run: sign to stake … NEAR*, shows **Delivered** and **Will stake**: in a simulation the delivery minus a new account's storage and the gas reserve; in a live run exactly what was delivered, capped only by what the account can spend. **What you'll sign** shows the `deposit_and_stake` transaction the staking module built (pool, gas, deposit) and what stays on the account for the unstake (0.1094 NEAR on 2026-11-09). The sign button reads **Connect NEAR wallet to stake for real**. The preview runs on the demo account's own balance (about 6 NEAR on 2026-11-09): for an amount that account can't cover, a **Preflight on the demo account** notice replaces the transaction preview. |
 | 5 | **Start a new stake** (back to the form), **Get a dry-run quote · nothing to pay** again, then a chip under **Or try another outcome**: **Exchange took a fee**, **Refunded**, **Failed** or **Deadline passed** | The tracker plays that outcome and says what it means for the money: *Less than quoted arrived* (1Click refunds it at the deadline, minus the refund fee), *Refunded* (amount and reason), *1Click reports the swap failed* (in a live run: check the refund address, then contact 1Click support), *Deadline passed* (anything sent is refunded; in a live run the page keeps asking 1Click once a minute in case it saw a deposit late). After the last three, **Try again with a new quote** leads back to the form. |
-| 6 | Pick **rNEAR** or **LiNEAR**, or click **Instant stNEAR · costs more** | rNEAR / LiNEAR: the token row (*Rhea rNEAR* / *LiNEAR*, with 1 token = … NEAR) is **Verified** when the contract runs pinned code and is not paused (otherwise **Paused** / **Unknown code**, and quoting is refused); **You get** shows the tokens at their current price. Instant stNEAR (*Meta Pool stNEAR*) needs a recipient registered on Meta Pool: an unregistered one gets **Not available** and no quote (`nima.near` was not registered on 2026-11-09). |
+| 6 | Pick **rNEAR** or **LiNEAR**, or click **Instant stNEAR · costs more** | rNEAR / LiNEAR: the token row (*Rhea rNEAR* / *LiNEAR*, with 1 token = … NEAR) is **Verified** when the contract runs pinned code and neither it nor its deposits or staking are paused (rNEAR can pause those on their own; otherwise **Paused** / **Unknown code**, and quoting is refused); **You get** shows the tokens at their current price. A first rNEAR stake keeps 0.00125 NEAR for the account's token registration, and the simulated stake step says so (*First stake into Rhea Liquid Near Staking Token: the contract keeps 0.00125 NEAR …*; `nima.near` held no rNEAR on 2026-11-09). Instant stNEAR (*Meta Pool stNEAR*) needs a recipient registered on Meta Pool: an unregistered one gets **Not available** and no quote (`nima.near` was not registered on 2026-11-09). |
 | 7 | **Portfolio** → **View a demo account** (`/portfolio?view=demo`, also **See a demo account** on the home page; `/positions` redirects to Portfolio) | The read-only portfolio of `nima.near`, marked **Demo**: a total and its state, *Next epoch* (*Next reward* while NEAR is staked) / *Unstaking* / *Ready to withdraw*, one card per position showing where it is (Staked → Unstaking with a countdown → Ready to withdraw → Back on your account) and only the actions that fit that state: **Unstake** for staked NEAR, **Withdraw** for unstaked NEAR, each opening a preview of the exact transaction (or the reason it can't run yet, e.g. still unbonding) with the sign button disabled (*Read-only*). Which buttons show depends on the account's state at the time: on 2026-11-09 it had ~168.9 NEAR unstaked and withdrawable in `astro-stakers.poolv1.near`, so its card offered only **Withdraw**, with a `withdraw_all` preview. |
 | 8 | **Portfolio** → **Recent activity** (`/history` redirects here) | What this browser did, newest first, in plain words with a state (*Done*, *In progress*, *Needs your signature*, *Refunded*, *Dry run*, …). Dry-run quotes collapse into one **Dry run** row. Live flows add each transaction as a labelled explorer link, **Open status** to reopen the tracker, and **Signed quote (keep for disputes)**: the whole 1Click response including its `signature`. |
 
@@ -63,14 +63,20 @@ your wallet on chain X ──deposit──▶ 1Click / NEAR Intents ──native
    preflight. The staking module re-checks the pool and balances, shows the exact transaction, and
    `stake({ amount, pool, expected })` refuses if the fresh plan differs from what you saw. NEAR holds back a
    transaction's prepaid gas when it accepts it (bought at `min_gas_purchase_price`, 10× the gas price; refunded
-   seconds later), so the module keeps that back too and leaves enough on the account to unstake later (~0.05 NEAR).
+   seconds later), so the module keeps that back too and leaves enough on the account for the largest exit, an
+   unstake that withdraws an unlocked balance in the same transaction (`[withdraw_all, unstake]`: 0.1094 NEAR on
+   2026-11-09). The app's own previews (*Kept on your account*, the simulated stake) use the same rule
+   (`exitReserve` in `src/lib/staking.ts`, checked against the module's `quote.reserve` in the tests and the e2e).
    A flow that was staked stays staked when reopened; a wallet error after signing is checked on chain before
    "Sign and stake" comes back.
 4. **Exit.** Unstake (an unlocked balance is withdrawn in the same transaction so it never locks again; next to a
-   balance still unbonding the module refuses unless you tick "restart the wait"), withdraw when unlocked, then
-   **Cash out to any chain** (Portfolio → *Available on your account*): NEAR → 1Click → a token on another chain,
-   refunds to your NEAR account. What is shown and signed there is the quote (its recipient and token); any edit
-   drops the quote.
+   balance still unbonding the module refuses unless you tick "restart the wait"; if the account can't pay the gas of
+   both calls, the module refuses with `claim-first` and the dialog offers **Withdraw … first**), withdraw when
+   unlocked, then **Cash out to any chain** (Portfolio → *Available on your account*): NEAR → 1Click → a token on
+   another chain, refunds to your NEAR account; it keeps the same exit reserve on the account. What is shown and
+   signed there is the quote (its recipient and token); any edit drops the quote. Exits don't depend on the
+   validator set or the epoch: when those can't be read, the unstake still goes out and the dialog says *Unlock time
+   unknown*.
 
 ## Where NEAR is used
 
@@ -84,13 +90,15 @@ Mainnet only (1Click has no testnet).
   `Transfer`s from `intents.near` to the account (`src/lib/near/reads.ts`, `src/lib/stakeAmount.ts`).
 - **Validator pools** `*.poolv1.near` / `*.pool.near`, through `@anywalletkit/protocol-staking-native-near`: calls
   `deposit_and_stake`, `unstake` / `unstake_all` (after `withdraw_all` in the same transaction when a balance is
-  already unlocked) and `withdraw_all`; view calls `get_account`, `get_reward_fee_fraction`, `is_staking_paused`,
-  the pool's code hash (`view_account`), the `validators` RPC (stake, uptime, last epoch's rewards for the APR and
-  the epoch clock), `EXPERIMENTAL_protocol_config` and `gas_price` (the fee model).
+  already unlocked) and `withdraw_all`; view calls `get_account`, `get_reward_fee_fraction`, `get_pool_summary`
+  (the fee already scheduled for the next epoch, on `*.pool.near` pools), `is_staking_paused`, the pool's code hash
+  (`view_account`), the `validators` RPC (stake, uptime, last epoch's rewards for the APR and the epoch clock),
+  `EXPERIMENTAL_protocol_config` and `gas_price` (the fee model).
 - **Liquid staking**, through `@anywalletkit/protocol-staking-liquid-near`: Rhea `lst.rhealab.near` (rNEAR) and
   `linear-protocol.near` (LiNEAR), pinned by account and code hash: `deposit_and_stake`, `unstake` / `unstake_all`,
   `withdraw_all`; view calls `ft_price` (also at a block 7 days back, on the archival node, for the APR),
-  `get_summary`, `get_account_details`, `ft_balance_of`, `is_paused`, `storage_balance_of`.
+  `get_summary`, `get_account_details`, `ft_balance_of`, `is_paused`, `pa_all_paused` (rNEAR's per-feature pauses),
+  `storage_balance_of` and `storage_balance_bounds` (what a first rNEAR stake keeps for registration).
 - **Meta Pool** `meta-pool.near`: `storage_balance_of` decides whether Instant stNEAR is offered; 1Click delivers the
   stNEAR itself.
 - **Cash out:** one transaction to `wrap.near` (`storage_deposit`, `near_deposit`, `ft_transfer` to 1Click's
@@ -127,32 +135,42 @@ Mainnet only (1Click has no testnet).
 ## Libraries, services and baseline
 
 **Any Wallet Kit staking modules, written during the hackathon.** Staking runs on two new
-[Any Wallet Kit](https://docs.anywallet.tech) modules by the same author; this app runs their 0.1.0 releases:
+[Any Wallet Kit](https://docs.anywallet.tech) modules by the same author:
 
-- `@anywalletkit/protocol-staking-native-near` 0.1.0: pools, allow-list, epochs, APR, positions, stake / unstake /
+- `@anywalletkit/protocol-staking-native-near` 0.2.0: pools, allow-list, epochs, APR, positions, stake / unstake /
   withdraw.
-- `@anywalletkit/protocol-staking-liquid-near` 0.1.0: LiNEAR and Rhea rNEAR, pinned by contract and code hash.
+- `@anywalletkit/protocol-staking-liquid-near` 0.1.1: LiNEAR and Rhea rNEAR, pinned by contract and code hash.
 
-Their source is the seven commits in https://github.com/ultratestbro/anywalletkit/compare/d9fefda2...c91d06eb,
-authored 2026-11-07 21:45 UTC – 2026-11-08 14:35 UTC (tags `@anywalletkit/protocol-staking-native-near@0.1.0` and
-`@anywalletkit/protocol-staking-liquid-near@0.1.0`). The last one, `c91d06eb`, is the release commit; it also
-released an unrelated package, `@anywalletkit/protocol-swap2-usdt0` 0.4.3. Both modules were published to npm with
-provenance on 2026-11-08 around 15:00 UTC.
+Their source is the nine commits in https://github.com/ultratestbro/anywalletkit/compare/d9fefda2...a1dccb2f,
+authored 2026-11-07 21:45 UTC – 2026-11-08 16:40 UTC. Their 0.1.0 releases (release commit `c91d06eb`, which also
+released an unrelated package, `@anywalletkit/protocol-swap2-usdt0` 0.4.3) were published to npm on 2026-11-08 around
+15:00 UTC. The versions used here add the review fixes of `dd93115c` (2026-11-08 16:39 UTC): a stake reserve sized for
+`[withdraw_all, unstake]` with the `claim-first` refusal, exits that don't depend on validator or epoch reads
+(`unlock: null`), no unstake that leaves dust, the scheduled-fee check on every `*.pool.near` pool, rNEAR's first-stake
+storage fee and per-feature pauses, and spendable = amount − max(0, storage − locked). Release commit `a1dccb2f` (tags
+`@anywalletkit/protocol-staking-native-near@0.2.0`, `@anywalletkit/protocol-staking-liquid-near@0.1.1`,
+`@anywalletkit/wallet-near@0.4.1`); all three were published to npm with provenance on 2026-11-08 around 17:00 UTC.
 
-**Baseline** (general-purpose Any Wallet Kit packages by the same author, not written for this project; Apache-2.0):
+**Baseline.** Any Wallet Kit ([github.com/ultratestbro/anywalletkit](https://github.com/ultratestbro/anywalletkit),
+`@anywalletkit/*` on npm), an open wallet SDK by the same author (Apache-2.0), is used here as a library. The
+pre-hackathon baseline is SDK commit
+[`77df2e37`](https://github.com/ultratestbro/anywalletkit/tree/77df2e3747adc8d8c7badccd81ddaaa3200c8038)
+(2026-10-18), the last one before the 2026-10-19 announcement; its packages were then named `@forgewallet/*`. The SDK
+kept being developed during the window
+([changes since the baseline](https://github.com/ultratestbro/anywalletkit/compare/77df2e37...main)): the
+`@anywalletkit/*` packages were first published to npm on 2026-10-24. The general-purpose packages used here, as
+pinned during the window:
 
 | Package | Pinned | Published to npm |
 |---|---|---|
 | `@anywalletkit/core` | 0.8.0 | 2026-11-02 |
-| `@anywalletkit/wallet-near` | 0.4.0 | 2026-11-02 |
+| `@anywalletkit/wallet-near` | 0.4.1 (the spendable-balance fix of `dd93115c`) | 2026-11-08 |
 | `@anywalletkit/wallet-solana` | 0.6.0 | 2026-11-02 |
 | `@anywalletkit/swap2-assets` | 0.2.2 (the 25-chain token catalog) | 2026-10-27 |
 
-Each of the four first appeared on npm on 2026-10-24 (after the 2026-10-19 cutoff); they are listed here as baseline
-all the same.
-
-**Provenance of this repository.** The first commit, `8e0ab20` (2026-11-07 22:36 UTC), is one large commit: the app
-was built in one sitting starting from NearJar's wallet and pay code (same author): `src/lib/pay/*` (source-chain
+**Provenance of this repository.** The first commit, `8e0ab20` (2026-11-07 22:36 UTC; the app was then named Stake
+Anywhere, renamed to NearAnyStake in `d75bb5a` on 2026-11-08), is one large commit: the app was built in one sitting
+starting from NearJar's wallet and pay code (same author): `src/lib/pay/*` (source-chain
 payers), `src/lib/appkit.ts`, `src/lib/near/selector.ts` (wallet-selector setup), `src/components/PayWithSheet.tsx`
 (the "Pay with" sheet), `src/components/FundsRoute.tsx` (the route strip), `Modal.tsx`, `ui.tsx`, and the design
 tokens and tactile buttons in `src/app/globals.css`. Everything after it is in the commit history.
@@ -161,8 +179,9 @@ tokens and tactile buttons in `src/app/globals.css`. Everything after it is in t
 (core, modal-ui, Meteor, HERE and Intear wallets); Reown AppKit 1.8 with its wagmi and Solana adapters, wagmi 2,
 `@wagmi/core` 2, viem 2, `@walletconnect/universal-provider` 2, TanStack Query 5 (EVM and Solana payers);
 `@solana/kit` 8 and `@solana/web3.js` 1 (Solana deposits); `@ton/core` 0.63 and `@tonconnect/ui` 5 (TON deposits);
-`sats-connect` 4 (Bitcoin wallets); `qrcode` 1 (deposit QR); `buffer` 6 (browser polyfill); `near-api-js` 6
-(installed; the app code doesn't import it). **Dev tools:** TypeScript 5, ESLint 9 with `eslint-config-next`,
+`sats-connect` 4 (Bitcoin wallets); `qrcode` 1 (deposit QR); `buffer` 6 (browser polyfill); `near-api-js` 6 (not
+imported by this repo: it is the peer dependency of Meteor Wallet's SDK, `@meteorwallet/sdk`, which the wallet
+selector's Meteor module uses). **Dev tools:** TypeScript 5, ESLint 9 with `eslint-config-next`,
 Tailwind CSS 4, Vitest 4. **Fonts:** Geist, Geist Mono and Comfortaa via `next/font/google` (downloaded at build time,
 served by the app).
 
@@ -171,15 +190,19 @@ served by the app).
 account staked with); dRPC (`near.drpc.org`); nearblocks API (unstake history, for exact unlock epochs) and
 nearblocks.io explorer links; Solana public RPC (`api.mainnet-beta.solana.com`) and toncenter (`toncenter.com`) behind
 the app's proxy; Reown / WalletConnect (optional, with `NEXT_PUBLIC_REOWN_PROJECT_ID`) and TON Connect for source-chain
-wallets; token icons from the catalog's CDNs (CoinGecko, CoinMarketCap, DeBank, GitHub raw).
+wallets; token icons from the catalog's CDNs (CoinGecko, CoinMarketCap, DeBank, GitHub raw). Source-chain
+transactions link to etherscan.io, basescan.org, arbiscan.io, optimistic.etherscan.io, bscscan.com, polygonscan.com,
+snowtrace.io, gnosisscan.io, solscan.io, tronscan.org, tonviewer.com, mempool.space and blockchair.com (Zcash,
+Dogecoin) (`src/lib/near/config.ts`), and wallet-selector is configured with `helper.mainnet.near.org` and the
+`api.kitwallet.app` indexer (`src/lib/near/selector.ts`).
 
 **Other hackathon project by the same author: [NearJar](https://nearjar.xyz)**
 ([github.com/ultratestbro/nearjar](https://github.com/ultratestbro/nearjar)), donation jars for near.com accounts
 payable from any chain. The two projects are independent; NearAnyStake reuses NearJar's wallet and pay code (listed
 above).
 
-**AI disclosure:** most code was written by Claude Code (Claude Opus) under the author's direction, and reviewed and
-tested by the author; commits it co-wrote carry a `Co-Authored-By: Claude` trailer.
+**AI disclosure:** All commits were co-written with Claude Code (each carries a `Co-Authored-By: Claude` trailer); the
+author directed, reviewed and tested the work.
 
 ## Run locally
 
@@ -192,8 +215,9 @@ pnpm install --frozen-lockfile
 pnpm test           # vitest: quote echo, dry-run guard, status machine on recorded 1Click answers, stake amount, wallet adapter,
                     # and the staking path on the real modules against a fake NEAR node (what the wallet is asked to sign)
 pnpm e2e            # read-only on mainnet: epoch, validators and the allow-list, APRs, the demo account's positions,
-                    # dry 1Click quotes from Base USDC / Solana SOL / Tron USDT with the echo check, and a deposit_and_stake
-                    # built (not sent) for the delivered amount. View calls and dry quotes only; E2E_REPORT=file.json saves a report
+                    # dry 1Click quotes from Base USDC / Solana SOL / Tron USDT with the echo check, a deposit_and_stake
+                    # built (not sent) for the delivered amount, and the dry-run simulated stake's preview on the demo account.
+                    # View calls and dry quotes only; E2E_REPORT=file.json saves a report
 pnpm typecheck && pnpm lint && pnpm build   # typecheck runs `next typegen` first, so it works on a fresh clone
 ```
 
@@ -212,7 +236,8 @@ pnpm dev            # http://localhost:3501; or `pnpm start` after `pnpm build` 
 ## Layout
 
 - `src/lib/staking.ts`: the only door to the staking modules. It hands out one module instance per account (shared
-  caches), with the app's RPCs, nearblocks history for exact unlock epochs and the archival node for liquid APRs.
+  caches), with the app's RPCs, nearblocks history for exact unlock epochs and the archival node for liquid APRs, and
+  holds the app's copy of the modules' reserve rule (`exitReserve`).
 - `e2e/`: the read-only mainnet checks behind `pnpm e2e`.
 - `src/lib/oneclick/`: request builder and echo check, browser client with the dry-run guard, status machine,
   dry-run replay. Recorded 1Click answers in `src/lib/__fixtures__/oneclick/`.
