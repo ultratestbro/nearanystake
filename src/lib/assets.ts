@@ -16,9 +16,15 @@ export interface SourceAsset {
   family: SourceFamily | null;
 }
 
+/** Catalog tokens 1Click doesn't list (its /v0/tokens on 2026-11-09): every quote answers "tokenIn is not valid". */
+const NOT_ON_1CLICK = new Set([
+  "nep141:eth-0xae7ab96520de3a18e5e111b5eaab095312d7fe84.omft.near", // stETH on Ethereum
+  "nep141:eth-0x9d65ff81a3c488d585bbfb0bfe3c7707c7917f54.omft.near", // SSV on Ethereum
+]);
+
 const ALL: SourceAsset[] = CC_SOURCE_CHAINS.flatMap((c) =>
   c.assets
-    .filter((a) => a.assetId)
+    .filter((a) => a.assetId && !NOT_ON_1CLICK.has(a.assetId))
     .map((a) => ({
       chain: c.caip2,
       chainLabel: c.label,
