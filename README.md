@@ -79,6 +79,21 @@ your wallet on chain X ──deposit──▶ 1Click / NEAR Intents ──native
    validator set or the epoch: when those can't be read, the unstake still goes out and the dialog says *Unlock time
    unknown*.
 
+### The full cycle on mainnet
+
+One account (`allintse.near`), one pool (`astro-stakers.poolv1.near`):
+
+| When (UTC) | Step | Transaction |
+| --- | --- | --- |
+| 2026-11-08 15:41 | 1Click delivers 0.5375 NEAR → `deposit_and_stake` 0.4260 NEAR (the rest stays as the exit reserve) | [`vZw1iyS3…`](https://nearblocks.io/txns/vZw1iyS3R1Z53XWm3K8vQpy2TtE1DBNLTjaPwro5owg) → [`UpiNJcc7…`](https://nearblocks.io/txns/UpiNJcc7MEL91iJBMbKVjvWyQ2t8xW7o8qgFa8Jq66Y) |
+| 2026-11-08 18:16 | delivers 0.5536 NEAR → stakes 0.5530 NEAR | [`8u1b3Gmk…`](https://nearblocks.io/txns/8u1b3GmkRWnkxoBXQ6fQ1Bwczssoqm6Shxu3TJrskwyA) → [`7A6j6BGx…`](https://nearblocks.io/txns/7A6j6BGx6B1x7KjtGiG1AhT2fREBQmp1FypM3dHkwv4S) |
+| 2026-11-08 19:43 | delivers 0.8190 NEAR → stakes 0.8185 NEAR | [`m24pnLVq…`](https://nearblocks.io/txns/m24pnLVqm9fVJ4yQaKguSmEQhQxsi8Qt5Usg7fytp6u) → [`FHQFyqpN…`](https://nearblocks.io/txns/FHQFyqpNjXdeTGNrjs5ridgq5J3tahCDWnbD1PotegBd) |
+| 2026-11-09 22:53 | `unstake` 1.747 NEAR in epoch 4953, unlocks in epoch 4957 | [`EeLUhoxW…`](https://nearblocks.io/txns/EeLUhoxWNwhXkFihLZ5RZAkQUL2tCEx49Yr7rKfqqvNC) |
+| 2026-11-10 20:22 | `withdraw_all` 1.747 NEAR once unlocked | [`JEGtKjZR…`](https://nearblocks.io/txns/JEGtKjZRTe87s47Mrqc3zUm83f24F9bpbsFAF98X3NJJ) |
+| 2026-11-10 20:23 | **Cash out to any chain**: 1.6046 NEAR → 1Click → 5.733312 USDC on Base (1Click `SUCCESS` 23 s later) | [`Ag2Nkhms…`](https://nearblocks.io/txns/Ag2Nkhmsz2Dq5ffbhn3ejzsSZicdRPxwW7wmM4g2qQ19) → [`0x725d4556…`](https://basescan.org/tx/0x725d455621c4655f11cd055578f02eb0b164f1b23fac6111af34c16d581696a5) |
+
+0.0508 NEAR is still staked there, with the reserve for its unstake left on the account.
+
 ## Where NEAR is used
 
 Mainnet only (1Click has no testnet).
