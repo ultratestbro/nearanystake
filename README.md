@@ -2,9 +2,9 @@
 
 **Stake NEAR from any chain.** Pay with a token you already hold on one of 25 chains (67 tokens: USDC on Base, SOL,
 ETH, BTC, USDT on Tron, …). NEAR Intents (1Click) delivers native NEAR to your own NEAR account, and one signature
-stakes exactly what arrived into the validator pool you pick, or mints Rhea rNEAR / LiNEAR (or 1Click delivers Meta
-Pool stNEAR directly: *Instant stNEAR*). Later, unstake with a live epoch countdown, withdraw, and cash the NEAR out
-to any chain.
+stakes what arrived (less what the account needs to keep ~0.11 NEAR for gas and a later unstake) into the
+validator pool you pick, or mints Rhea rNEAR / LiNEAR (or 1Click delivers Meta Pool stNEAR directly: *Instant
+stNEAR*). Later, unstake with a live epoch countdown, withdraw, and cash the NEAR out to any chain.
 
 **Problem it solves:** holding USDC on Base, SOL or another chain but wanting to stake NEAR normally means a bridge or
 an exchange first, then a transfer to a NEAR wallet, then staking; here it is one quote, one payment and one
@@ -13,6 +13,14 @@ signature, and the NEAR lands in your own account.
 - **Live:** https://nearanystake.xyz (NEAR mainnet; dry-run mode until you connect a NEAR wallet)
 - **Code:** https://github.com/ultratestbro/nearanystake, Apache-2.0 (`LICENSE`)
 - **Demo post with video:** https://x.com/0xdanya_xo/status/2119921038179934335
+- **Proven on mainnet** (one account, 2026-11-08 → 11-10; [every NEAR-side transaction](#the-full-cycle-on-mainnet)):
+  three paid 1Click deliveries, each staked into `astro-stakers.poolv1.near`
+  ([`UpiNJcc7…`](https://nearblocks.io/txns/UpiNJcc7MEL91iJBMbKVjvWyQ2t8xW7o8qgFa8Jq66Y) and two more); 1.747 NEAR
+  unstaked ([`EeLUhoxW…`](https://nearblocks.io/txns/EeLUhoxWNwhXkFihLZ5RZAkQUL2tCEx49Yr7rKfqqvNC)) and withdrawn
+  ([`JEGtKjZR…`](https://nearblocks.io/txns/JEGtKjZRTe87s47Mrqc3zUm83f24F9bpbsFAF98X3NJJ)); 1.6046 NEAR cashed out as
+  5.733312 USDC on Base ([`Ag2Nkhms…`](https://nearblocks.io/txns/Ag2Nkhmsz2Dq5ffbhn3ejzsSZicdRPxwW7wmM4g2qQ19) →
+  [`0x725d4556…`](https://basescan.org/tx/0x725d455621c4655f11cd055578f02eb0b164f1b23fac6111af34c16d581696a5)). These
+  paid runs cover native-pool staking; rNEAR, LiNEAR and Instant stNEAR haven't had one yet.
 
 Built for the NEAR Hackathon 2026, tracks **DeFi** and **Open**. Non-custodial: no contract of ours, no server
 holding funds or keys. The app never sees a private key.
@@ -39,7 +47,7 @@ Dry-run mode: real 1Click quotes, real pools and APRs, no deposit address. Quote
 
 | # | Do | See |
 |---|---|---|
-| 9 | **Connect NEAR** in the header (Meteor, HERE or Intear) | The header switch turns to **Live** (unless you picked dry run before in this browser) and quotes deliver to your account. A live quote has a one-time deposit address, QR, memo when needed, and a **Refund deadline**, when the refund begins (1 h; 3 h for Bitcoin, Zcash, Litecoin, Dogecoin and Bitcoin Cash; paying stops 5 / 90 min before it). Pay once from an EVM, Solana, TON, Tron or Bitcoin wallet, or by hand; the tracker follows 1Click, then one signature (**Sign and stake**) stakes exactly what arrived. A brand-new implicit account works: the delivery creates it. |
+| 9 | **Connect NEAR** in the header (Meteor, HERE or Intear) | The header switch turns to **Live** (unless you picked dry run before in this browser) and quotes deliver to your account. A live quote has a one-time deposit address, QR, memo when needed, and a **Refund deadline**, when the refund begins (1 h; 3 h for Bitcoin, Zcash, Litecoin, Dogecoin and Bitcoin Cash; paying stops 5 / 90 min before it). Pay once from an EVM, Solana, TON, Tron or Bitcoin wallet, or by hand; the tracker follows 1Click, then one signature (**Sign and stake**) stakes what arrived, keeping the exit reserve on the account. A brand-new implicit account works: the delivery creates it. |
 | 10 | **Portfolio** with your account | Your positions with **Unstake** / **Withdraw** that sign real transactions, and **Cash out to any chain** under *Available on your account*: NEAR → 1Click → a token on another chain, refunds to your NEAR account. |
 
 ## How it works
@@ -81,13 +89,14 @@ your wallet on chain X ──deposit──▶ 1Click / NEAR Intents ──native
 
 ### The full cycle on mainnet
 
-One account (`allintse.near`), one pool (`astro-stakers.poolv1.near`):
+One account (`allintse.near`), one pool (`astro-stakers.poolv1.near`), every NEAR-side transaction. The payments into
+1Click on the other chains aren't linked here.
 
 | When (UTC) | Step | Transaction |
 | --- | --- | --- |
 | 2026-11-08 15:41 | 1Click delivers 0.5375 NEAR → `deposit_and_stake` 0.4260 NEAR (the rest stays as the exit reserve) | [`vZw1iyS3…`](https://nearblocks.io/txns/vZw1iyS3R1Z53XWm3K8vQpy2TtE1DBNLTjaPwro5owg) → [`UpiNJcc7…`](https://nearblocks.io/txns/UpiNJcc7MEL91iJBMbKVjvWyQ2t8xW7o8qgFa8Jq66Y) |
-| 2026-11-08 18:16 | delivers 0.5536 NEAR → stakes 0.5530 NEAR | [`8u1b3Gmk…`](https://nearblocks.io/txns/8u1b3GmkRWnkxoBXQ6fQ1Bwczssoqm6Shxu3TJrskwyA) → [`7A6j6BGx…`](https://nearblocks.io/txns/7A6j6BGx6B1x7KjtGiG1AhT2fREBQmp1FypM3dHkwv4S) |
-| 2026-11-08 19:43 | delivers 0.8190 NEAR → stakes 0.8185 NEAR | [`m24pnLVq…`](https://nearblocks.io/txns/m24pnLVqm9fVJ4yQaKguSmEQhQxsi8Qt5Usg7fytp6u) → [`FHQFyqpN…`](https://nearblocks.io/txns/FHQFyqpNjXdeTGNrjs5ridgq5J3tahCDWnbD1PotegBd) |
+| 2026-11-08 18:16 | delivers 0.5536 NEAR → stakes 0.5530 NEAR (0.0005 NEAR tops the exit reserve back up after the previous stake's gas) | [`8u1b3Gmk…`](https://nearblocks.io/txns/8u1b3GmkRWnkxoBXQ6fQ1Bwczssoqm6Shxu3TJrskwyA) → [`7A6j6BGx…`](https://nearblocks.io/txns/7A6j6BGx6B1x7KjtGiG1AhT2fREBQmp1FypM3dHkwv4S) |
+| 2026-11-08 19:43 | delivers 0.8190 NEAR → stakes 0.8185 NEAR (the same top-up) | [`m24pnLVq…`](https://nearblocks.io/txns/m24pnLVqm9fVJ4yQaKguSmEQhQxsi8Qt5Usg7fytp6u) → [`FHQFyqpN…`](https://nearblocks.io/txns/FHQFyqpNjXdeTGNrjs5ridgq5J3tahCDWnbD1PotegBd) |
 | 2026-11-09 22:53 | `unstake` 1.747 NEAR in epoch 4953, unlocks in epoch 4957 | [`EeLUhoxW…`](https://nearblocks.io/txns/EeLUhoxWNwhXkFihLZ5RZAkQUL2tCEx49Yr7rKfqqvNC) |
 | 2026-11-10 20:22 | `withdraw_all` 1.747 NEAR once unlocked | [`JEGtKjZR…`](https://nearblocks.io/txns/JEGtKjZRTe87s47Mrqc3zUm83f24F9bpbsFAF98X3NJJ) |
 | 2026-11-10 20:23 | **Cash out to any chain**: 1.6046 NEAR → 1Click → 5.733312 USDC on Base (1Click `SUCCESS` 23 s later) | [`Ag2Nkhms…`](https://nearblocks.io/txns/Ag2Nkhmsz2Dq5ffbhn3ejzsSZicdRPxwW7wmM4g2qQ19) → [`0x725d4556…`](https://basescan.org/tx/0x725d455621c4655f11cd055578f02eb0b164f1b23fac6111af34c16d581696a5) |
@@ -124,7 +133,7 @@ Mainnet only (1Click has no testnet).
 
 ## Safety rules the code enforces
 
-- **Stake only what was delivered.** Never "balance minus reserve": an account that already held 1000 NEAR stakes
+- **Never stake more than was delivered**, and leave the exit reserve on the account. Never "balance minus reserve": an account that already held 1000 NEAR stakes
   only the 0.73 it just received (`src/lib/stakeAmount.ts`, tested).
 - **No free-form NEAR recipient.** The NEAR side of every quote is the connected account. The response's
   `quoteRequest` must echo recipient, refund address, assets, amount, swap/recipient/refund/deposit types, slippage,
