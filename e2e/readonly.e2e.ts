@@ -6,7 +6,7 @@ import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { findAsset } from "@/lib/assets";
 import { formatUnits } from "@/lib/format";
-import { DRY_REFUND, depositAddressToShow } from "@/lib/dryrun";
+import { depositAddressToShow, dryRefundFor } from "@/lib/dryrun";
 import { DEMO_ACCOUNT, SUGGESTED_POOL } from "@/lib/near/config";
 import { checkRecipient, nearClient } from "@/lib/near/reads";
 import { watchAccount } from "@/lib/near/selector-account";
@@ -105,15 +105,15 @@ describe("mainnet, read-only", () => {
   });
 
   const routes = [
-    { key: "base-usdc", chain: "eip155:8453", symbol: "USDC", amount: 5_000_000n, family: "evm" },
-    { key: "solana-sol", chain: "solana:mainnet", symbol: "SOL", amount: 50_000_000n, family: "solana" },
-    { key: "tron-usdt", chain: "tron:728126428", symbol: "USDT", amount: 110_000_000n, family: "tron" },
+    { key: "base-usdc", chain: "eip155:8453", symbol: "USDC", amount: 5_000_000n },
+    { key: "solana-sol", chain: "solana:mainnet", symbol: "SOL", amount: 50_000_000n },
+    { key: "tron-usdt", chain: "tron:728126428", symbol: "USDT", amount: 110_000_000n },
   ] as const;
   for (const r of routes) {
     it(`dry 1Click quote: ${r.symbol} on ${r.chain} → native NEAR for ${DEMO_ACCOUNT}, echo verified`, async () => {
       const asset = findAsset(r.chain, r.symbol)!;
       expect(asset).toBeTruthy();
-      const req = buildInboundQuoteRequest({ target: "near", originAsset: asset.assetId, amount: r.amount, recipient: DEMO_ACCOUNT, refundTo: DRY_REFUND[r.family]!, dry: true });
+      const req = buildInboundQuoteRequest({ target: "near", originAsset: asset.assetId, amount: r.amount, recipient: DEMO_ACCOUNT, refundTo: dryRefundFor(r.chain)!, dry: true });
       expect(req.destinationAsset).toBe(NEAR_ASSET);
       expect("customRecipientMsg" in req).toBe(false);
       // the guard: in dry mode a non-dry request never leaves the process
